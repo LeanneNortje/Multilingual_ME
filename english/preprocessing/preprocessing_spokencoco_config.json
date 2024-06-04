@@ -1,0 +1,21 @@
+{
+    "data_train": "data/train_lookup.npz", 
+    "data_val": "data/val_lookup.npz",  
+
+    "audio_base": "data/",
+
+    "out_dir": "data/", 
+
+    "audio_config": {
+        "audio_type": "melspectrogram",
+        "preemph_coef": 0.97,
+        "sample_rate": 16000,
+        "window_size": 0.025,
+        "window_stride": 0.01,
+        "window_type": "hamming",
+        "num_mel_bins": 40,
+        "target_length": 256,
+        "fmin": 20
+    }
+
+}

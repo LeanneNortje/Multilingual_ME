@@ -1,0 +1,15 @@
+data/
+model_metadata/**/*.pt
+model_metadata/**/tensorboard/
+pretrained/
+pretrained_cpc/
+results/
+
+*.wav
+*.jpg
+*.npz
+*.ckpt
+**.pdf
+**.csv
+*/__pycache__/*
+*/__pycache__/*.pyc
