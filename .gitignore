@@ -1,1 +1,6 @@
 MultilingualDataset/
+data
+__pycache__
+pretrained
+pretrained_cpc
+results
