@@ -50,27 +50,6 @@ BACKEND = "nccl"
 INIT_METHOD = "tcp://localhost:54321"
 
 
-def collapse_pixels(im):
-    im = im.view(im.size(0), im.size(1), -1).transpose(1, 2)
-    return im  # .mean(dim=1)
-
-
-def loadImage(impath, args):
-    image_conf = args["image_config"]
-    RGB_mean = image_conf.get("RGB_mean")
-    RGB_std = image_conf.get("RGB_std")
-
-    resize = transforms.Resize((256, 256))
-    to_tensor = transforms.ToTensor()
-    image_normalize = transforms.Normalize(mean=RGB_mean, std=RGB_std)
-
-    img = Image.open(impath).convert("RGB")
-    img = resize(img)
-    img = to_tensor(img)
-    img = image_normalize(img)
-    return img
-
-
 def validate(
     audio_model,
     image_model,
@@ -143,6 +122,7 @@ def spawn_training(rank, world_size, image_base, args):
 
     if rank == 0:
         writer = SummaryWriter(args["exp_dir"] / "tensorboard")
+
     best_epoch, best_acc = 0, 0
     global_step, start_epoch = 0, 0
     info = {}
@@ -433,12 +413,292 @@ def spawn_training(rank, world_size, image_base, args):
     dist.destroy_process_group()
 
 
+def train1(image_base, args):
+
+    torch.manual_seed(42)
+    writer = SummaryWriter(args["exp_dir"] / "tensorboard")
+
+    best_epoch, best_acc = 0, 0
+    global_step, start_epoch = 0, 0
+    info = {}
+    rank = 0
+    loss_tracker = valueTracking()
+
+    heading("\nLoading training data ")
+    train_dataset = ImageAudioDatawithSampling(
+        image_base,
+        args["data_train"],
+        Path("data/train_lookup.npz"),
+        args,
+        rank,
+    )
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=args["batch_size"],
+        num_workers=4,
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    heading("\nLoading validation data ")
+    args["image_config"]["center_crop"] = True
+    validation_loader = torch.utils.data.DataLoader(
+        ImageAudioDatawithSamplingVal(
+            image_base,
+            args["data_val"],
+            Path("data/val_lookup.npz"),
+            args,
+            rank,
+        ),
+        batch_size=args["batch_size"],
+        shuffle=False,
+        num_workers=1,
+        pin_memory=True,
+    )
+
+    heading("\nSetting up Audio model ")
+    audio_model = mutlimodal(args).to(rank)
+
+    heading("\nSetting up image model ")
+    image_model = vision(args).to(rank)
+
+    heading("\nSetting up attention model ")
+    attention = ScoringAttentionModule(args).to(rank)
+
+    heading("\nSetting up contrastive loss ")
+    contrastive_loss = infonce
+
+    model_with_params_to_update = {
+        "audio_model": audio_model,
+        "attention": attention,
+        # "contrastive_loss": contrastive_loss,
+        "image_model": image_model,
+    }
+    model_to_freeze = {}
+    trainable_parameters = getParameters(
+        model_with_params_to_update, model_to_freeze, args
+    )
+
+    if args["optimizer"] == "sgd":
+        optimizer = torch.optim.SGD(
+            trainable_parameters,
+            args["learning_rate_scheduler"]["initial_learning_rate"],
+            momentum=args["momentum"],
+            weight_decay=args["weight_decay"],
+        )
+    elif args["optimizer"] == "adam":
+        optimizer = torch.optim.Adam(
+            trainable_parameters,
+            args["learning_rate_scheduler"]["initial_learning_rate"],
+            weight_decay=args["weight_decay"],
+        )
+    else:
+        raise ValueError("Optimizer %s is not supported" % args["optimizer"])
+
+    if args["resume"] is False and args["cpc"]["warm_start"]:
+        print("Loading pretrained acoustic weights")
+        audio_model = loadPretrainedWeights(audio_model, args, rank)
+
+    if args["resume"]:
+        if "restore_epoch" in args:
+            info, start_epoch, global_step, best_epoch, best_acc = (
+                loadModelAttriburesAndTrainingAtEpochAMP(
+                    args["exp_dir"],
+                    audio_model,
+                    image_model,
+                    attention,
+                    contrastive_loss,
+                    optimizer,
+                    rank,
+                    args["restore_epoch"],
+                )
+            )
+            print(
+                f"\nEpoch particulars:\n\t\tepoch = {start_epoch}\n\t\tglobal_step = {global_step}\n\t\tbest_epoch = {best_epoch}\n\t\tbest_acc = {best_acc}\n"
+            )
+        else:
+            info, start_epoch, global_step, best_epoch, best_acc = (
+                loadModelAttriburesAndTrainingAMP(
+                    args["exp_dir"],
+                    audio_model,
+                    image_model,
+                    attention,
+                    contrastive_loss,
+                    optimizer,
+                    rank,
+                )
+            )
+            print(
+                f"\nEpoch particulars:\n\t\tepoch = {start_epoch}\n\t\tglobal_step = {global_step}\n\t\tbest_epoch = {best_epoch}\n\t\tbest_acc = {best_acc}\n"
+            )
+
+    start_epoch += 1
+
+    for epoch in np.arange(start_epoch, args["n_epochs"] + 1):
+        # train_dataset.set_epoch(int(epoch))
+        current_learning_rate = adjust_learning_rate(args, optimizer, epoch, 0.00001)
+
+        audio_model.train()
+        image_model.train()
+        attention.train()
+        # contrastive_loss.train()
+
+        loss_tracker.new_epoch()
+        start_time = time.time()
+        printEpoch(
+            epoch,
+            0,
+            len(train_loader),
+            loss_tracker,
+            best_acc,
+            start_time,
+            start_time,
+            current_learning_rate,
+        )
+
+        i = 0
+
+        for value_dict in train_loader:
+
+            optimizer.zero_grad()
+
+            image_output = image_model(value_dict["image"].to(rank))
+
+            english_input = value_dict["english_feat"].to(rank)
+            _, _, english_output = audio_model(english_input)
+
+            dutch_input = value_dict["dutch_feat"].to(rank)
+            _, _, dutch_output = audio_model(dutch_input)
+
+            french_input = value_dict["french_feat"].to(rank)
+            _, _, french_output = audio_model(french_input)
+
+            positives = []
+            for p, pos_dict in enumerate(value_dict["positives"]):
+                pos_image_output = image_model(pos_dict["pos_image"].to(rank)) 
+
+                pos_english_input = pos_dict["pos_english"].to(rank)
+                _, _, pos_english_output = audio_model(pos_english_input)
+
+                pos_dutch_input = pos_dict["pos_dutch"].to(rank)
+                _, _, pos_dutch_output = audio_model(pos_dutch_input)
+
+                pos_french_input = pos_dict["pos_french"].to(rank)
+                _, _, pos_french_output = audio_model(pos_french_input)
+
+                positives.append(
+                    {
+                        "image": pos_image_output,
+                        "english_output": pos_english_output,
+                        "dutch_output": pos_dutch_output,
+                        "french_output": pos_french_output,
+                    }
+                )
+
+            negatives = []
+            for n, neg_dict in enumerate(value_dict["negatives"]):
+                neg_image_output = image_model(
+                    neg_dict["neg_image"].to(rank)
+                )  # neg_images[n]
+
+                neg_english_input = neg_dict["neg_english"].to(rank)
+                _, _, neg_english_output = audio_model(neg_english_input)
+
+                neg_dutch_input = neg_dict["neg_dutch"].to(rank)
+                _, _, neg_dutch_output = audio_model(neg_dutch_input)
+
+                neg_french_input = neg_dict["neg_french"].to(rank)
+                _, _, neg_french_output = audio_model(neg_french_input)
+
+                negatives.append(
+                    {
+                        "image": neg_image_output,
+                        "english_output": neg_english_output,
+                        "dutch_output": neg_dutch_output,
+                        "french_output": neg_french_output,
+                    }
+                )
+
+            loss = compute_matchmap_similarity_matrix_loss(
+                image_output,
+                english_output,
+                dutch_output,
+                french_output,
+                negatives,
+                positives,
+                attention,
+                contrastive_loss,  # audio_attention,
+                margin=args["margin"],
+                simtype=args["simtype"],
+                alphas=args["alphas"],
+                rank=rank,
+            )
+
+            loss.backward()
+            optimizer.step()
+
+            loss_tracker.update(
+                loss.detach().item(), english_input.detach().size(0)
+            )  #####
+            end_time = time.time()
+            printEpoch(
+                epoch,
+                i + 1,
+                len(train_loader),
+                loss_tracker,
+                best_acc,
+                start_time,
+                end_time,
+                current_learning_rate,
+            )
+            if np.isnan(loss_tracker.average):
+                print("training diverged...")
+                return
+
+            global_step += 1
+            i += 1
+
+        avg_acc = validate(
+            audio_model,
+            image_model,
+            attention,
+            contrastive_loss,
+            validation_loader,
+            rank,
+            image_base,
+            args,
+        )
+
+        writer.add_scalar("loss/train", loss_tracker.average, epoch)
+        writer.add_scalar("loss/val", avg_acc, epoch)
+
+        best_acc, best_epoch = saveModelAttriburesAndTrainingAMP(
+            args["exp_dir"],
+            audio_model,
+            image_model,
+            attention,
+            contrastive_loss,
+            optimizer,
+            info,
+            int(epoch),
+            global_step,
+            best_epoch,
+            avg_acc,
+            best_acc,
+            loss_tracker.average,
+            end_time - start_time,
+        )
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--resume", action="store_true", dest="resume", help="load from exp_dir if True"
+        "--resume",
+        action="store_true",
+        dest="resume",
+        help="load from exp_dir if True",
     )
     parser.add_argument(
         "--config-file",
@@ -448,19 +708,27 @@ if __name__ == "__main__":
         help="Model config file.",
     )
     parser.add_argument(
-        "--restore-epoch", type=int, default=-1, help="Epoch to resore training from."
+        "--restore-epoch",
+        type=int,
+        default=-1,
+        help="Epoch to resore training from.",
     )
-    parser.add_argument("--image-base", default=".", help="Path to images.")
+    parser.add_argument(
+        "--image-base",
+        default=".",
+        help="Path to images.",
+    )
     command_line_args = parser.parse_args()
 
     # Setting up model specifics
     heading("\nSetting up model files ")
     args, image_base = modelSetup(command_line_args)
 
-    world_size = torch.cuda.device_count() - 2
-    mp.spawn(
-        spawn_training,
-        args=(world_size, image_base, args),
-        nprocs=world_size,
-        join=True,
-    )
+    train1(image_base, args)
+    # world_size = torch.cuda.device_count() - 2
+    # mp.spawn(
+    #     spawn_training,
+    #     args=(world_size, image_base, args),
+    #     nprocs=world_size,
+    #     join=True,
+    # )

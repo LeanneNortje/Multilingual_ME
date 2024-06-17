@@ -64,7 +64,7 @@ def acousticModel(args):
 def loadPretrainedWeights(audio_model, args, rank):
 
 	# device = torch.device(args["device"] if torch.cuda.is_available() else "cpu")
-	audio_model = torch.nn.DataParallel(audio_model)
+	# audio_model = torch.nn.DataParallel(audio_model)
 	model_dict = audio_model.state_dict()
 
 	cpc_pretrained_name = args['cpc']['pretrained_weights']
@@ -75,7 +75,8 @@ def loadPretrainedWeights(audio_model, args, rank):
 		if key in model_dict: model_dict[key] = checkpoint["acoustic_model"][key]
 	audio_model.load_state_dict(model_dict)
 
-	return audio_model.module
+	return audio_model
+	# return audio_model.module
 
 def loadPretrainedSemanticWeights(english_model, hindi_model, args):
 

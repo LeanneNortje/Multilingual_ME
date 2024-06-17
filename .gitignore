@@ -4,3 +4,4 @@ __pycache__
 pretrained
 pretrained_cpc
 results
+model_metadata
