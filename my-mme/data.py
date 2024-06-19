@@ -15,6 +15,13 @@ from utils import read_file
 Split = Literal["train", "valid", "test"]
 
 
+def load_dictionary():
+    def parse_line(line):
+        en, nl, fr = line.split()
+        return {"en": en, "nl": nl, "fr": fr}
+    return read_file("data/concepts.txt", parse_line)
+
+
 class MEDataset:
     def __init__(self, split: Split):
         self.split = split
@@ -57,10 +64,14 @@ class PairedMEDataset(IterableDataset):
                     "label": 1,
                 }
 
-            images_neg = concat(self.dataset.images[w] for w in self.dataset.words if w != word)
+            images_neg = concat(
+                self.dataset.images[w] for w in self.dataset.words if w != word
+            )
             images_neg = random.sample(images_neg, self.n_neg)
 
-            audios_neg = concat(self.dataset.audios[w] for w in self.dataset.words if w != word)
+            audios_neg = concat(
+                self.dataset.audios[w] for w in self.dataset.words if w != word
+            )
             audios_neg = random.sample(audios_neg, self.n_neg)
 
             for image_name, audio_name in zip(images_neg, audios_neg):
@@ -69,7 +80,6 @@ class PairedMEDataset(IterableDataset):
                     "audio": self.dataset.load_audio(audio_name),
                     "label": 0,
                 }
-
 
 
 def setup_data(config):
