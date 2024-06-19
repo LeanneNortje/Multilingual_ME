@@ -50,7 +50,7 @@ def prepare_audio_filelist(split):
     data_audio = [
         {
             "lang": lang,
-            "audio": audio_name.stem,
+            "name": audio_name.stem,
             "word-en": extract_word_en(lang, audio_name.stem),
         }
         for _, data1 in data.items()
@@ -66,7 +66,7 @@ def prepare_image_filelist(split):
     data = load_data(split)
     data_image = [
         {
-            "image": image_name.stem,
+            "name": image_name.stem,
             "word-en": image_name.stem.split("_")[0],
         }
         for _, data1 in data.items()
