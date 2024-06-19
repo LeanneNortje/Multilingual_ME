@@ -2,7 +2,7 @@ from itertools import groupby
 from typing import Literal, Tuple
 
 import random
-import json
+import pdb
 
 import librosa
 import numpy as np
@@ -10,8 +10,7 @@ import scipy
 
 import torch
 
-from torch.utils.data import DataLoader, Dataset, IterableDataset, default_collate
-from torch.utils.data.sampler import SubsetRandomSampler
+from torch.utils.data import DataLoader, IterableDataset, default_collate
 from torch.nn.utils.rnn import pad_sequence
 
 from PIL import Image
@@ -60,6 +59,19 @@ def load_audio(datum: dict) -> torch.Tensor:
     def preemphasis(signal, coeff=0.97):
         return np.append(signal[0], signal[1:] - coeff * signal[:-1])
 
+    def pad_to_length(data, len_target, pad_value=0):
+        # data: T × D
+        len_pad = len_target - len(data)
+        if len_pad > 0:
+            return np.pad(
+                data,
+                ((0, len_pad), (0, 0)),
+                "constant",
+                constant_values=pad_value,
+            )
+        else:
+            return data[:len_target]
+
     CONFIG = {
         "preemph-coef": 0.97,
         "sample-rate": 16_000,
@@ -69,7 +81,7 @@ def load_audio(datum: dict) -> torch.Tensor:
         "num-mel-bins": 40,
         "target-length": 256,
         "use-raw_length": False,
-        "padval": 0,
+        "pad-value": 0,
         "fmin": 20,
     }
 
@@ -95,10 +107,13 @@ def load_audio(datum: dict) -> torch.Tensor:
         fmin=CONFIG["fmin"],
     )
 
-    logspec = librosa.power_to_db(melspec, ref=np.max)
-    logspec = torch.tensor(logspec)
+    logspec = librosa.power_to_db(melspec, ref=np.max)  # D × T
+
+    logspec = logspec.T  # T × D
+    logspec = pad_to_length(logspec, CONFIG["target-length"], CONFIG["pad-value"])
     logspec = logspec.T
 
+    logspec = torch.tensor(logspec)
     return logspec
 
 
@@ -183,12 +198,12 @@ def setup_data(config):
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        num_workers=config["num_workers"],
+        num_workers=config["num-workers"],
     )
     valid_dataloader = DataLoader(
         valid_dataset,
         batch_size=batch_size,
-        num_workers=config["num_workers"],
+        num_workers=config["num-workers"],
     )
 
     return train_dataloader, valid_dataloader
@@ -205,10 +220,10 @@ if __name__ == "__main__":
     n_pos = 4
     n_neg = 12
     batch_size = n_pos + n_neg
-    dataset = PairedMEDataset(split="train", langs=("english",), n_pos=n_pos, n_neg=n_neg)
-    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=3, collate_fn=my_collate_fn)
+    dataset = PairedMEDataset(
+        split="train", langs=("english",), n_pos=n_pos, n_neg=n_neg
+    )
+    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=0)
     for batch in dataloader:
         print(batch)
-        import pdb
-
         pdb.set_trace()
