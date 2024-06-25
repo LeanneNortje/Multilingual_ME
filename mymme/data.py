@@ -48,9 +48,19 @@ transform_image = transforms.Compose(
 )
 
 
-def load_image(datum: dict) -> torch.Tensor:
+def get_image_path(datum: dict):
     name = datum["name"]
-    path = f"data/images/{name}.jpg"
+    return f"data/images/{name}.jpg"
+
+
+def get_audio_path(datum: dict):
+    name = datum["name"]
+    lang = datum["lang"]
+    return f"data/{lang}_words/{name}.wav"
+
+
+def load_image(datum: dict) -> torch.Tensor:
+    path = get_image_path(datum)
     img = Image.open(path).convert("RGB")
     return transform_image(img)
 
@@ -85,9 +95,7 @@ def load_audio(datum: dict) -> torch.Tensor:
         "fmin": 20,
     }
 
-    name = datum["name"]
-    lang = datum["lang"]
-    path = f"data/{lang}_words/{name}.wav"
+    path = get_audio_path(datum)
     y, sr = librosa.load(path, sr=CONFIG["sample-rate"])
     y = y - y.mean()
     y = preemphasis(y, CONFIG["preemph-coef"])
@@ -107,6 +115,7 @@ def load_audio(datum: dict) -> torch.Tensor:
         fmin=CONFIG["fmin"],
     )
 
+    # logspec = melspec
     logspec = librosa.power_to_db(melspec, ref=np.max)  # D × T
 
     logspec = logspec.T  # T × D
@@ -148,6 +157,31 @@ class PairedMEDataset(IterableDataset):
 
         self.n_pos = n_pos
         self.n_neg = n_neg
+        self.get_word = self.get_word_train if split == "train" else self.get_word_valid
+
+    def get_word_train(self):
+        while True:
+            yield random.choice(self.dataset.words_seen)
+
+    def get_word_valid(self):
+        return self.dataset.words_seen
+
+    # def __iter__(self):
+    #     # worker_info = torch.utils.data.get_worker_info()
+    #     # print(worker_info.id)
+
+    #     while True:
+    #         for i, word in enumerate(self.dataset.words_seen):
+    #             image = random.choice(self.dataset.word_to_images[word])
+    #             audio = random.choice(self.dataset.word_to_audios[word])
+    #             # image = self.dataset.word_to_images[word][0]
+    #             # audio = self.dataset.word_to_audios[word][0]
+
+    #             yield {
+    #                 "image": load_image(image),
+    #                 "audio": load_audio(audio),
+    #                 "label": i,
+    #             }
 
     def __iter__(self):
         # worker_info = torch.utils.data.get_worker_info()
@@ -157,12 +191,14 @@ class PairedMEDataset(IterableDataset):
             words = set(self.dataset.words_seen) - set([word])
             words = random.choices(list(words), k=self.n_neg)
             return [random.choice(data[word]) for word in words]
+            # return data["boat"][: self.n_neg]
 
-        while True:
-            word = random.choice(self.dataset.words_seen)
+        for word in self.get_word():
+            images_pos = random.choices(self.dataset.word_to_images[word], k=self.n_pos)
+            audios_pos = random.choices(self.dataset.word_to_audios[word], k=self.n_pos)
 
-            images_pos = random.sample(self.dataset.word_to_images[word], self.n_pos)
-            audios_pos = random.sample(self.dataset.word_to_audios[word], self.n_pos)
+            # images_pos = self.dataset.word_to_images[word][: self.n_pos]
+            # audios_pos = self.dataset.word_to_audios[word][: self.n_pos]
 
             for image_name, audio_name in zip(images_pos, audios_pos):
                 yield {
@@ -182,9 +218,7 @@ class PairedMEDataset(IterableDataset):
                 }
 
 
-def setup_data(config):
-    num_pos = config["num-pos"]
-    num_neg = config["num-neg"]
+def setup_data(*, num_pos, num_neg, num_workers):
     batch_size = num_pos + num_neg
 
     kwargs = {
@@ -198,12 +232,12 @@ def setup_data(config):
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        num_workers=config["num-workers"],
+        num_workers=num_workers,
     )
     valid_dataloader = DataLoader(
         valid_dataset,
         batch_size=batch_size,
-        num_workers=config["num-workers"],
+        num_workers=1,
     )
 
     return train_dataloader, valid_dataloader
