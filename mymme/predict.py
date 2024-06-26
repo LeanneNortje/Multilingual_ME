@@ -27,18 +27,45 @@ def load_model(config_name, config):
     folder = Path("output") / config_name
     state = torch.load(get_best_checkpoint(folder))
     model.load_state_dict(state)
-    # model.to(device=config["device"])
+    model.to(device=config["device"])
     model.eval()
     return model
 
+
+dataset = MEDataset("train", langs=("english",))
 
 config_name = "00"
 config = CONFIGS[config_name]
 model = load_model(config_name, config)
 
-dataset = MEDataset("valid", langs=("english", ))
+# audio_names = [
+#     "bear_6794-73984-0066",
+#     "bear_2920-156230-0017",
+#     "bear_5727-47030-0033",
+#     "bear_2405-182390-0025",
+# ]
+# 
+# image_names = [
+#     "bear_n02133161_1737",
+#     "bear_n02132136_9478",
+#     "bear_n02134084_5807",
+#     "bear_n02132136_6388",
+# ]
+
+# for audio_name, image_name in zip(audio_names, image_names):
+#     audio = load_audio({"name": audio_name, "lang": "english"})
+#     audio = audio.unsqueeze(0)
+#     image = load_image({"name": image_name})
+#     image = image.unsqueeze(0)
+#     with torch.no_grad():
+#         pdb.set_trace()
+#         score = model.score(audio, image, "pair")
+#         print(score)
+
+
 for _ in range(10):
-    word = random.choice(dataset.words_seen)
+    word = "bear"
+    # word = random.choice(dataset.words_seen)
     words_other = set(dataset.words_seen) - set([word])
     word_neg = random.choice(list(words_other))
 
@@ -52,7 +79,7 @@ for _ in range(10):
     image_pos = image_pos.unsqueeze(0)
     image_neg = load_image(datum_image_neg)
     image_neg = image_neg.unsqueeze(0)
-    
+
     with torch.no_grad():
         score_pos = model.score(audio, image_pos, "pair")
         score_neg = model.score(audio, image_neg, "pair")

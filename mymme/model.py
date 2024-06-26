@@ -7,16 +7,15 @@ class AudioEncoder(nn.Module):
     def __init__(
         self,
         *,
-        in_channels,
-        num_channels,
-        kernel_size,
-        stride,
-        padding,
-        z_dim,
-        c_dim,
-        frame_dim,
-        use_pretrained_cpc,
-        embedding_dim,
+        in_channels=40,
+        num_channels=64,
+        kernel_size=4,
+        stride=2,
+        padding=1,
+        z_dim=64,
+        c_dim=512,
+        frame_dim=256,
+        use_pretrained_cpc=False,
     ):
         super(AudioEncoder, self).__init__()
 
@@ -155,7 +154,7 @@ class AudioEncoder(nn.Module):
 
 
 class ImageEncoder(nn.Module):
-    def __init__(self, *, embedding_dim, use_pretrained_alexnet):
+    def __init__(self, *, embedding_dim=2048, use_pretrained_alexnet=True):
         super(ImageEncoder, self).__init__()
         seed_model = alexnet(pretrained=False)
         self.image_model = nn.Sequential(*list(seed_model.features.children()))
@@ -207,6 +206,11 @@ class MattNet(nn.Module):
         return x / x.norm(dim=dim, keepdim=True)
 
     def score(self, audio, image, type):
+        # def compute1(a, i):
+        #     att = torch.bmm(a.unsqueeze(0).transpose(1, 2), i.unsqueeze(0))
+        #     s = att.max()
+        #     return s
+
         EINSUM_OP = {
             "pair": "bda,bdi->bai",
             "cross": "xda,ydi->xyai",
@@ -216,11 +220,14 @@ class MattNet(nn.Module):
         audio_embedding = self.audio_enc(audio)
         image_embedding = self.image_enc(image)
 
+        # sim = torch.stack([torch.stack([compute1(a, i) for i in image_embedding]) for a in audio_embedding])
+        # sim = torch.cat(att).to(audio.device)
+
         # audio_embedding = self.l2_normalize(audio_embedding, dim=1)
         # image_embedding = self.l2_normalize(image_embedding, dim=1)
 
-        att = torch.einsum(op, audio_embedding, image_embedding)
-        sim, _ = att.max(dim=-1)
+        sim = torch.einsum(op, audio_embedding, image_embedding)
+        sim, _ = sim.max(dim=-1)
         sim, _ = sim.max(dim=-1)
 
         # τ = torch.maximum(self.logit_scale.exp(), torch.tensor(100.0))

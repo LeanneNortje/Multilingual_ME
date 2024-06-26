@@ -11,7 +11,7 @@ import click
 from ignite.engine import Events, create_supervised_trainer, create_supervised_evaluator
 from ignite.handlers import ModelCheckpoint
 from ignite.handlers.early_stopping import EarlyStopping
-from ignite.metrics import Loss
+from ignite.metrics import Loss, RunningAverage
 from ignite.utils import convert_tensor, manual_seed
 
 from ignite.handlers.tensorboard_logger import (
@@ -28,33 +28,25 @@ CONFIGS = {
         "seed": 42,
         "device": "cuda",
         "max_epochs": 50,
-        "epoch_length": 500,
+        # "epoch_length": 500,
         "n_saved": 3,
         "patience": 5,
-        "log_every_iters": 10,
-        "lr": 0.0001,
+        "log_every_iters": 5,
+        "optimizer": {
+            "lr": 0.0001,
+            "weight_decay": 5e-7,
+        },
         "data": {
+            "langs": ("english", ),
             "num_pos": 32,
             "num_neg": 256,
-            # "num_pos": 1,
-            # "num_neg": 12,
             "num_workers": 32,
+            "num_word_repeats": 64,
+            "to_shuffle": True,
         },
         "model": {
             "model_name": "mattnet",
             "audio_encoder_kwargs": {
-                # Conv params
-                "in_channels": 40,
-                "embedding_dim": 2048,
-                "num_channels": 64,
-                "kernel_size": 4,
-                "stride": 2,
-                "padding": 1,
-                # LSTM params
-                "z_dim": 64,
-                "c_dim": 512,
-                # Last layer params
-                "frame_dim": 256,
                 "use_pretrained_cpc": False,
             },
             "image_encoder_kwargs": {
@@ -63,14 +55,52 @@ CONFIGS = {
             },
         },
     },
+    "01": {
+        "seed": 42,
+        "device": "cuda",
+        "max_epochs": 50,
+        # "epoch_length": 500,
+        "n_saved": 3,
+        "patience": 5,
+        "log_every_iters": 5,
+        "optimizer": {
+            "lr": 0.0001,
+            "weight_decay": 5e-7,
+        },
+        "data": {
+            "langs": ("english", ),
+            "num_pos": 32,
+            "num_neg": 256,
+            "num_workers": 32,
+            "num_word_repeats": 64,
+            "to_shuffle": False,
+        },
+        "model": {
+            "model_name": "mattnet",
+            "audio_encoder_kwargs": {
+                "use_pretrained_cpc": False,
+            },
+            "image_encoder_kwargs": {
+                "embedding_dim": 2048,
+                "use_pretrained_alexnet": True,
+            },
+        },
+    },
+
 }
 
 
 def info_nce_cross_entropy_loss(pred, true):
     def loss_dir(pred):
+        # pred1 = torch.concat((pred[0, :1], pred[0, true == 0]))
+        # assert true.sum() == 1
+        # pred1 = pred[0]
+        # pred1 = F.softmax(pred1, dim=0)
+        # loss = -pred1[0].log()
+        # return loss
         pred1 = pred[true == 1]
         pred1 = F.softmax(pred1, dim=1)
-        pred1 = pred1[:, true == 1].sum(dim=0)
+        pred1 = pred1[:, true == 1].sum(dim=1)
         loss = -torch.log(pred1).mean()
         return loss
 
@@ -110,15 +140,21 @@ def train(config_name: str):
     model = setup_model(**config["model"])
     model.to(device=device)
 
-    optimizer = optim.Adam(model.parameters(), lr=config["lr"])
-    # loss_fn = nn.CrossEntropyLoss().to(device=device)
+    # optimizer = optim.Adam(model.parameters(), **config["optimizer"])
+    optimizer = optim.Adam(
+        [
+            {"params": model.audio_enc.parameters(), "name": "audio-enc"},
+            {"params": model.image_enc.parameters(), "name": "image-enc"},
+        ],
+        **config["optimizer"],
+    )
 
     metrics = {
         "loss": Loss(info_nce_cross_entropy_loss, device=device),
     }
 
     def prepare_batch_fn(batch, device, non_blocking):
-        batch = {k: convert_tensor(v, device, non_blocking) for k, v in batch.items()}
+        batch = {k: convert_tensor(v, device, non_blocking).squeeze(0) for k, v in batch.items()}
         inp = batch["audio"], batch["image"]
         out = batch["label"]
         return inp, out
@@ -169,10 +205,13 @@ def train(config_name: str):
     handler = EarlyStopping(config["patience"], score_func, trainer)
     evaluator.add_event_handler(Events.EPOCH_COMPLETED, handler)
 
+    metric = RunningAverage(output_transform=lambda x: x)
+    metric.attach(trainer, "running-average-loss")
+
     # Print metrics to the stderr with `add_event_handler` API for training stats
     def print_metrics(engine, tag):
         if tag == "train":
-            metrics_str = "loss: {:.3f}".format(engine.state.output)
+            metrics_str = "loss: {:.3f} · loss avg: {:.3f}".format(engine.state.output, engine.state.metrics["running-average-loss"])
         elif tag == "valid":
             metrics_str = "loss: {:.3f}".format(engine.state.metrics["loss"])
         else:
@@ -226,7 +265,7 @@ def train(config_name: str):
     trainer.run(
         dataloader_train,
         max_epochs=config["max_epochs"],
-        epoch_length=config["epoch_length"],
+        # epoch_length=config["epoch_length"],
     )
 
 
