@@ -3,11 +3,15 @@ from pathlib import Path
 
 import json
 import pdb
+import random
 import numpy as np
 
 from toolz import first
 
 from mymme.data import load_dictionary
+
+
+random.seed(42)
 
 
 DATA_DIR = Path("./data")
@@ -78,8 +82,40 @@ def prepare_image_filelist(split):
     save_data(data_image, "image", split)
 
 
+def prepare_pairs_filelist(split, langs, num_word_repeat):
+    from mymme.data import MEDataset
+
+    assert split in ["train", "valid"]
+    dataset = MEDataset(split, langs)
+
+    def sample_neg(data, word):
+        words = set(dataset.words_seen) - set([word])
+        word = random.choice(list(words))
+        return random.choice(data[word])
+
+    def sample_pair(word):
+        audio = random.choice(dataset.word_to_audios[word])
+        image_pos = random.choice(dataset.word_to_images[word])
+        image_neg = sample_neg(dataset.word_to_images, word)
+        return {
+            "audio": audio,
+            "image-pos": image_pos,
+            "image-neg": image_neg,
+        }
+
+    data = [
+        sample_pair(word)
+        for word in dataset.words_seen
+        for _ in range(num_word_repeat)
+    ]
+
+    with open(f"mymme/data/filelists/pairs-{split}.json", "w") as f:
+        json.dump(data, f, indent=2)
+
+
 if __name__ == "__main__":
-    prepare_audio_filelist("train")
-    prepare_audio_filelist("valid")
-    prepare_image_filelist("train")
-    prepare_image_filelist("valid")
+    # prepare_audio_filelist("train")
+    # prepare_audio_filelist("valid")
+    # prepare_image_filelist("train")
+    # prepare_image_filelist("valid")
+    prepare_pairs_filelist("valid", ("english", ), 10)

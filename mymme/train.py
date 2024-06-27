@@ -86,7 +86,35 @@ CONFIGS = {
             },
         },
     },
-
+    "02": {
+        "seed": 42,
+        "device": "cuda",
+        "max_epochs": 5,
+        "n_saved": 3,
+        "patience": 5,
+        "log_every_iters": 5,
+        "optimizer": {
+            "lr": 0.0001,
+            "weight_decay": 5e-7,
+        },
+        "data": {
+            "langs": ("english", ),
+            "num_pos": 8,
+            "num_neg": 32,
+            "num_workers": 32,
+            "to_shuffle": False,
+        },
+        "model": {
+            "model_name": "mattnet",
+            "audio_encoder_kwargs": {
+                "use_pretrained_cpc": False,
+            },
+            "image_encoder_kwargs": {
+                "embedding_dim": 2048,
+                "use_pretrained_alexnet": True,
+            },
+        },
+    },
 }
 
 
@@ -202,8 +230,8 @@ def train(config_name: str):
     )
 
     # Early stopping
-    handler = EarlyStopping(config["patience"], score_func, trainer)
-    evaluator.add_event_handler(Events.EPOCH_COMPLETED, handler)
+    # handler = EarlyStopping(config["patience"], score_func, trainer)
+    # evaluator.add_event_handler(Events.EPOCH_COMPLETED, handler)
 
     metric = RunningAverage(output_transform=lambda x: x)
     metric.attach(trainer, "running-average-loss")

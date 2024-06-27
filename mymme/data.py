@@ -155,7 +155,7 @@ class PairedMEDataset(Dataset):
         langs,
         num_pos: int,
         num_neg: int,
-        num_word_repeats: int,
+        # num_word_repeats: int,
         to_shuffle: bool = False,
     ):
         super(PairedMEDataset).__init__()
@@ -166,12 +166,16 @@ class PairedMEDataset(Dataset):
         self.n_pos = num_pos
         self.n_neg = num_neg
 
-        num_word_repeats = num_word_repeats if split == "train" else 1
-        words_seen = self.dataset.words_seen
-        self.words = [word for word in words_seen for _ in range(num_word_repeats)]
+        # num_word_repeats = num_word_repeats if split == "train" else 1
+        # words_seen = self.dataset.words_seen
+        # self.words = [word for word in words_seen for _ in range(num_word_repeats)]
+
+        # Use Leanne's order
+        self.word_audio = [(word, audio) for word, audios in self.dataset.word_to_audios.items() for audio in audios]
+        self.word_audio = sorted(self.word_audio, key=lambda x: x[0])
 
         if to_shuffle and split == "train":
-            random.shuffle(self.words)
+            random.shuffle(self.word_audio)
 
     def __getitem__(self, i):
         # worker_info = torch.utils.data.get_worker_info()
@@ -184,9 +188,10 @@ class PairedMEDataset(Dataset):
             words = random.choices(list(words), k=self.n_neg)
             return [random.choice(data[word]) for word in words]
 
-        word = self.words[i]
+        word, audio_pos = self.word_audio[i]
         images_pos = random.choices(self.dataset.word_to_images[word], k=self.n_pos)
-        audios_pos = random.choices(self.dataset.word_to_audios[word], k=self.n_pos)
+        audios_pos = random.choices(self.dataset.word_to_audios[word], k=self.n_pos - 1)
+        audios_pos = [audio_pos] + audios_pos
 
         data_pos = [
             {
@@ -212,7 +217,7 @@ class PairedMEDataset(Dataset):
         return default_collate(data_pos + data_neg)
 
     def __len__(self):
-        return len(self.words)
+        return len(self.word_audio)
 
 
 def setup_data(*, num_workers, **dataset_kwargs):
@@ -240,9 +245,10 @@ if __name__ == "__main__":
         langs=("english",),
         num_pos=num_pos,
         num_neg=num_neg,
-        num_word_repeats=5,
+        # num_word_repeats=5,
     )
     dataloader = DataLoader(dataset, num_workers=4)
+    import pdb; pdb.set_trace()
     for batch in dataloader:
         # print(batch["image"][0, 0, :3, :3])
         pdb.set_trace()
