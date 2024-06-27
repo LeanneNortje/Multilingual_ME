@@ -144,10 +144,10 @@ def compute_matchmap_similarity_matrix_loss(
 
     pos_i_e = torch.cat(pos_i_e, dim=1)
     pos_e_i = torch.cat(pos_e_i, dim=1)
-    pos_i_d = torch.cat(pos_i_d, dim=1)
-    pos_d_i = torch.cat(pos_d_i, dim=1)
-    pos_i_f = torch.cat(pos_i_f, dim=1)
-    pos_f_i = torch.cat(pos_f_i, dim=1)
+    # pos_i_d = torch.cat(pos_i_d, dim=1)
+    # pos_d_i = torch.cat(pos_d_i, dim=1)
+    # pos_i_f = torch.cat(pos_i_f, dim=1)
+    # pos_f_i = torch.cat(pos_f_i, dim=1)
 
 
     # pos_e_d = torch.cat(pos_e_d, dim=1)
@@ -157,9 +157,10 @@ def compute_matchmap_similarity_matrix_loss(
     # pos_d_f = torch.cat(pos_d_f, dim=1)
     # pos_f_d = torch.cat(pos_f_d, dim=1)
 
+    # import pdb; pdb.set_trace()
     loss = contrastive_loss(i_e.unsqueeze(-1), pos_i_e.unsqueeze(-1), pos_e_i.unsqueeze(-1), neg_i_e.unsqueeze(-1), neg_e_i.unsqueeze(-1))   
-    loss += contrastive_loss(i_d.unsqueeze(-1), pos_i_d.unsqueeze(-1), pos_d_i.unsqueeze(-1), neg_i_d.unsqueeze(-1), neg_d_i.unsqueeze(-1))  
-    loss += contrastive_loss(i_f.unsqueeze(-1), pos_i_f.unsqueeze(-1), pos_f_i.unsqueeze(-1), neg_i_f.unsqueeze(-1), neg_f_i.unsqueeze(-1))  
+    # loss += contrastive_loss(i_d.unsqueeze(-1), pos_i_d.unsqueeze(-1), pos_d_i.unsqueeze(-1), neg_i_d.unsqueeze(-1), neg_d_i.unsqueeze(-1))  
+    # loss += contrastive_loss(i_f.unsqueeze(-1), pos_i_f.unsqueeze(-1), pos_f_i.unsqueeze(-1), neg_i_f.unsqueeze(-1), neg_f_i.unsqueeze(-1))  
  
     # loss += contrastive_loss(e_d.unsqueeze(-1), pos_e_d.unsqueeze(-1), pos_d_e.unsqueeze(-1), neg_e_d.unsqueeze(-1), neg_d_e.unsqueeze(-1))  
     # loss += contrastive_loss(e_f.unsqueeze(-1), pos_e_f.unsqueeze(-1), pos_f_e.unsqueeze(-1), neg_e_f.unsqueeze(-1), neg_f_e.unsqueeze(-1))  

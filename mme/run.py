@@ -97,7 +97,7 @@ def validate(
         scores = torch.cat([anch, negatives], dim=1)
         treshold = anch.size(1)  # + positives.size(1)
         ind = torch.argsort(scores, dim=1, descending=True)[:, 0:treshold]
-        acc = (ind[:, 0:treshold] <= treshold).float().mean().detach().item()
+        acc = (ind[:, 0:treshold] < treshold).float().mean().detach().item()
 
         end_time = time.time()
         _, hours, minutes, seconds = timeFormat(start_time, end_time)
@@ -432,6 +432,9 @@ def train1(image_base, args):
         args,
         rank,
     )
+    # subset
+    num_samples = len(train_dataset)
+    # train_dataset = torch.utils.data.Subset(train_dataset, range(0, num_samples, 100))
     train_loader = DataLoader(
         train_dataset,
         batch_size=args["batch_size"],
@@ -533,6 +536,17 @@ def train1(image_base, args):
             )
 
     start_epoch += 1
+
+    avg_acc = validate(
+        audio_model,
+        image_model,
+        attention,
+        contrastive_loss,
+        validation_loader,
+        rank,
+        image_base,
+        args,
+    )
 
     for epoch in np.arange(start_epoch, args["n_epochs"] + 1):
         # train_dataset.set_epoch(int(epoch))

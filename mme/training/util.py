@@ -166,9 +166,11 @@ class valueTracking(object):
         self.epoch_average = 0
         self.epoch_sum = 0
         self.num_epoch_values = 0
+        self.last_value = 0
 
     def update(self, value, n=1):
 
+        self.last_value = value
         self.sum += value * n
         self.num_values += n
         self.average = self.sum / self.num_values
@@ -220,8 +222,8 @@ def printEpoch(epoch, step, num_steps, loss_tracker, best_acc, start_time, end_t
 
     column_separator = ' | '
     epoch_string = f'Epoch: {epoch:<4} |'
-    epoch_info_string = f'Loss: ' + floatFormat (loss_tracker.epoch_average) + column_separator 
-    epoch_info_string +=  f'Average loss: ' + floatFormat(loss_tracker.average) + column_separator
+    epoch_info_string = f'Loss: ' + floatFormat(loss_tracker.last_value) + " · " + floatFormat(loss_tracker.epoch_average) + column_separator 
+    epoch_info_string += f'Average loss: ' + floatFormat(loss_tracker.average) + column_separator
     epoch_info_string += f'Best accuracy: ' + floatFormat(best_acc) + column_separator
     epoch_info_string += f'LR: ' + floatFormat(lr) + column_separator
     epoch_info_string += f'Epoch time: {hours:>2} hours  {minutes:>2} minutes  {seconds:>2} seconds'
@@ -289,6 +291,7 @@ def tablePrinting(headings, row_headings, values):
 
 def adjust_learning_rate(args, optimizer, epoch, lr):
     
+    import pdb; pdb.set_trace()
     scheduler = args['learning_rate_scheduler']
     assert(len(scheduler['num_epochs']) == len(scheduler['learning_rates']))
 

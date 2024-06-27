@@ -20,6 +20,8 @@ sys.path.append("..")
 import warnings
 warnings.filterwarnings("ignore")
 
+np.random.seed(42)
+
 scipy_windows = {
     'hamming': scipy.signal.hamming,
     'hann': scipy.signal.hann, 
@@ -173,12 +175,15 @@ class ImageAudioDatawithSampling(Dataset):
         english_audio_feat, english_nframes = self._PadFeat(english_audio_feat)
         wav_name = str(Path(self.data[index]).stem)
 
+
         # id_lookup = self.pos_masks_to_images[id]['images'].copy()
         names = list(self.pos_masks_to_images[id]['images'].keys())
         image_name = np.random.choice(names, size=num_pos+1, replace=False)
         imgpath = np.random.choice(self.pos_masks_to_images[id]['images'][image_name[0]], size=1)[0]
         imgpath = self.image_base_path / str(imgpath)
         image = self._LoadImage(imgpath)
+
+        # print(wav_name, imgpath.stem)
 
         names = list(self.pos_masks_to_images[id]['french'].keys())
         french_name = np.random.choice(names, size=num_pos+1, replace=False)

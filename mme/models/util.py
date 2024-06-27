@@ -72,7 +72,11 @@ def loadPretrainedWeights(audio_model, args, rank):
 	checkpoint = torch.load(checkpoint_fn, map_location={'cuda:%d' % 0: 'cuda:%d' % rank})
 
 	for key in checkpoint["acoustic_model"]:
-		if key in model_dict: model_dict[key] = checkpoint["acoustic_model"][key]
+		if key in model_dict:
+			model_dict[key] = checkpoint["acoustic_model"][key]
+		else:
+			print(f"Missing key: {key}")
+
 	audio_model.load_state_dict(model_dict)
 
 	return audio_model

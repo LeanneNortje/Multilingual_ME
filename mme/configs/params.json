@@ -5,7 +5,7 @@
     "episodes_test": "data/test_episodes.npz",
     "data_path": "data/spokencoco",
     "optimizer": "adam",
-    "batch_size": 4,
+    "batch_size": 8,
     "momentum": 0.9,
     "weight_decay": 5e-07,
     "n_epochs": 100,

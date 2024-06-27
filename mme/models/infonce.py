@@ -18,6 +18,7 @@ def infonce(anchor, positives_1, positives_2, negatives_1, negatives_2):
         dim=2,
     )
     logits = logits.transpose(1, 2).reshape(b * (2 + 2 * n_pos), (1 + n_neg))
+    # logits = logits.transpose(1, 2).reshape(b * 2, (1 + n_neg))
     labels = torch.zeros(len(logits), dtype=torch.long, device=anchor.device)
     return F.cross_entropy(logits, labels)
 
