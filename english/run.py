@@ -102,7 +102,7 @@ def validate(audio_model, image_model, attention, contrastive_loss, val_loader, 
         scores = torch.cat([anch, negatives], dim=1)
         treshold = anch.size(1) #+ positives.size(1)
         ind = torch.argsort(scores, dim=1, descending=True)[:, 0:treshold]
-        acc = (ind[:, 0:treshold] <= treshold).float().mean().detach().item()
+        acc = (ind[:, 0:treshold] < treshold).float().mean().detach().item()
 
         end_time = time.time()
         days, hours, minutes, seconds = timeFormat(start_time, end_time)
