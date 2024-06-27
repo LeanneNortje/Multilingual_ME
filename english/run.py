@@ -293,7 +293,9 @@ def spawn_training(rank, world_size, image_base, args):
                 args["exp_dir"], english_model, 
                 image_model, attention, contrastive_loss, optimizer, info, int(epoch), global_step, best_epoch, avg_acc, best_acc, loss_tracker.average, end_time-start_time)
 
-    writer.close()
+    if rank == 0:
+        writer.close()
+
     dist.destroy_process_group()
 
 
