@@ -130,7 +130,7 @@ def spawn_training(rank, world_size, image_base, args):
 
     if rank == 0: heading(f'\nLoading training data ')
     train_dataset = ImageAudioDatawithSampling(image_base, args["data_train"], Path("data/train_lookup.npz"), args, rank)
-    train_sampler = DistributedSampler(train_dataset, drop_last=True)
+    train_sampler = DistributedSampler(train_dataset, drop_last=True, shuffle=args["to-shuffle-data"])
     train_loader = DataLoader(
         train_dataset,
         batch_size=args["batch_size"],
@@ -138,6 +138,7 @@ def spawn_training(rank, world_size, image_base, args):
         num_workers=4,
         pin_memory=True,
         drop_last=True,
+        shuffle=args["to-shuffle-data"],
     )
 
 
@@ -277,6 +278,7 @@ def spawn_training(rank, world_size, image_base, args):
             if np.isnan(loss_tracker.average):
                 print("training diverged...")
                 return
+
             # else:
             global_step += 1 
             # if i == 10: break
