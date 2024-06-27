@@ -6,3 +6,4 @@ pretrained
 pretrained_cpc
 results
 model_metadata
+checkpoints/
