@@ -265,9 +265,15 @@ def spawn_training(rank, world_size, image_base, args):
             loss.backward()
             optimizer.step()
 
-            loss_tracker.update(loss.detach().item(), english_input.detach().size(0)) #####
+            loss_value = loss.detach().item()
+            loss_tracker.update(loss_value, english_input.detach().size(0)) #####
             end_time = time.time()
-            if rank == 0: printEpoch(epoch, i+1, len(train_loader), loss_tracker, best_acc, start_time, end_time, current_learning_rate)
+
+            if rank == 0:
+                printEpoch(epoch, i+1, len(train_loader), loss_tracker, best_acc, start_time, end_time, current_learning_rate)
+                writer.add_scalar("train/loss", loss_value, global_step)
+                writer.add_scalar("train/loss-avg", loss_tracker.average, global_step)
+
             if np.isnan(loss_tracker.average):
                 print("training diverged...")
                 return
@@ -291,12 +297,15 @@ def spawn_training(rank, world_size, image_base, args):
     dist.destroy_process_group()
 
 
+def find_configs():
+    return [file for file in os.listdir("configs") if file.endswith(".json")]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--resume", action="store_true", dest="resume",
             help="load from exp_dir if True")
-    parser.add_argument("--config-file", type=str, default='matchmap', choices=['matchmap'],
-            help="Model config file.")
+    parser.add_argument("--config-file", type=str, choices=find_configs(), help="Model config file.")
     parser.add_argument("--restore-epoch", type=int, default=-1, help="Epoch to resore training from.")
     parser.add_argument("--image-base", default=".", help="Path to images.")
     command_line_args = parser.parse_args()

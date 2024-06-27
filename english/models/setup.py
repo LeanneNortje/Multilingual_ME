@@ -15,9 +15,6 @@ import numpy as np
 import torch
 import shutil
 
-config_library = {
-    "matchmap": "params.json"
-}
 
 def printDirectory(path):
     parts = str(path).strip("./").split("/")
@@ -58,8 +55,8 @@ def modelSetup(parser, test=False):
 
     parser = vars(parser)
     config_file = parser.pop("config_file")
-    print(f'configs/{config_library[config_file]}')
-    with open(f'configs/{config_library[config_file]}') as file:
+    print(f'configs/{config_file}')
+    with open(f'configs/{config_file}') as file:
         args = json.load(file)
 
     if "restore_epoch" in parser:
@@ -94,11 +91,12 @@ def modelSetup(parser, test=False):
     args["data_val"] = Path(args["data_val"])
     args["data_test"] = Path(args["data_test"])
 
-    modelHash(args)
+    # modelHash(args)
 
     base_dir = Path("model_metadata")    
-    model_particulars = f'{args["model_name"]}' 
-    args["exp_dir"] = base_dir / model_particulars / str(instance)
+    # model_particulars = f'{args["model_name"]}' 
+    model_name = Path(config_file).stem
+    args["exp_dir"] = base_dir / model_name / str(instance)
 
     if test or resume:
 
@@ -138,10 +136,10 @@ def modelSetup(parser, test=False):
 
     args['instance'] = instance
 
-    print(args["exp_dir"], config_library[config_file])
-    if os.path.isfile(args["exp_dir"] / config_library[config_file]) is False:
+    print(args["exp_dir"], config_file)
+    if os.path.isfile(args["exp_dir"] / config_file) is False:
         print(f'Copying original config file:')
-        shutil.copyfile(f'configs/{config_library[config_file]}', args["exp_dir"] / config_library[config_file])
+        shutil.copyfile(f'configs/{config_file}', args["exp_dir"] / config_file)
 
     print(f'Model arguments:')
     printArguments(args)
