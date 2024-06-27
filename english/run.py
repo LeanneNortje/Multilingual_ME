@@ -282,18 +282,18 @@ def spawn_training(rank, world_size, image_base, args):
             # if i == 10: break
             # break
             i += 1
-        # break
+
         if rank == 0:
             # avg_acc = validate_contrastive(audio_model, image_model, attention, contrastive_loss, validation_loader, rank, args)
             avg_acc = validate(english_model, image_model, attention, contrastive_loss, validation_loader, rank, image_base, args)
-            # break
-            writer.add_scalar("loss/train", loss_tracker.average, epoch)
-            writer.add_scalar("loss/val", avg_acc, epoch)
+            writer.add_scalar("valid/accuracy", avg_acc, epoch)
+            # writer.add_scalar("train/loss", loss_tracker.average, epoch)
 
             best_acc, best_epoch = saveModelAttriburesAndTrainingAMP(
                 args["exp_dir"], english_model, 
                 image_model, attention, contrastive_loss, optimizer, info, int(epoch), global_step, best_epoch, avg_acc, best_acc, loss_tracker.average, end_time-start_time)
-        # break
+
+    writer.close()
     dist.destroy_process_group()
 
 
