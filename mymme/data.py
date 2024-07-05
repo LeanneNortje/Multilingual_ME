@@ -220,12 +220,12 @@ class PairedMEDataset(Dataset):
         return len(self.word_audio)
 
 
-def setup_data(*, num_workers, **dataset_kwargs):
+def setup_data(*, num_workers, batch_size, **dataset_kwargs):
     train_dataset = PairedMEDataset(split="train", **dataset_kwargs)
     valid_dataset = PairedMEDataset(split="valid", **dataset_kwargs)
 
-    train_dataloader = DataLoader(train_dataset, num_workers=num_workers)
-    valid_dataloader = DataLoader(valid_dataset, num_workers=num_workers)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, num_workers=num_workers)
 
     return train_dataloader, valid_dataloader
 

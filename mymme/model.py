@@ -1,5 +1,7 @@
 import torch
+
 import torch.nn as nn
+from torch.nn import functional as F
 from torchvision.models import alexnet
 
 
@@ -174,7 +176,7 @@ class ImageEncoder(nn.Module):
         if use_pretrained_alexnet:
             print("Using pretrained AlexNet")
             path = "mymme/checkpoints/alexnet-self-supervised.pth"
-            model_weights = torch.load(path)
+            model_weights = torch.load(path, map_location="cpu")
             model_dict = self.image_model.state_dict()
             for key in model_weights["model"]:
                 if "features" in key:
@@ -233,6 +235,54 @@ class MattNet(nn.Module):
         # τ = torch.maximum(self.logit_scale.exp(), torch.tensor(100.0))
         τ = 1.0
         return τ * sim
+
+    def compute_loss(self, audio, image, labels):
+        """Input shapes:
+
+        - audio:  B × (pos + neg) × D × T
+        - image:  B × (pos + neg) × 3 × H × W
+        - labels: B × (pos + neg)
+
+        """
+
+        def score_audio_image(audio_emb, image_emb):
+            op = "bnda,bmdi->bnmai"
+            sim = torch.einsum(op, audio_emb, image_emb)
+            sim, _ = sim.max(dim=-1)
+            sim, _ = sim.max(dim=-1)
+            return sim
+
+        B1, N1, D, T = audio.shape
+        B2, N2, C, H, W = image.shape
+
+        assert B1 == B2 and N1 == N2
+        B = B1
+        N = N1
+
+        audio = audio.view(B * N, D, T)
+        audio_emb = self.audio_enc(audio)
+        audio_emb = audio_emb.view(B, N, *audio_emb.shape[1:])
+
+        image = image.view(B * N, C, H, W)
+        image_emb = self.image_enc(image)
+        image_emb = image_emb.view(B, N, *image_emb.shape[1:])
+
+        # assume one positive per batch and all positives are in first position
+        assert labels.sum() == B
+        assert labels[:, 0].sum() == B
+        assert labels[:, 1:].sum() == 0
+        # assert labels == torch.cat([torch.ones(B, 1), torch.zeros(B, N - 1)], dim=1)
+
+        sim1 = score_audio_image(audio_emb[:, :1], image_emb)
+        sim1 = sim1.squeeze(1)
+        sim2 = score_audio_image(audio_emb, image_emb[:, :1])
+        sim2 = sim2.squeeze(2)
+
+        pred = torch.cat([sim1, sim2], dim=0)
+
+        true = torch.zeros(2 * B).to(labels.device).long()
+        return F.cross_entropy(pred, true)
+
 
 
 MODELS = {
