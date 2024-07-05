@@ -8,7 +8,7 @@ import numpy as np
 
 from toolz import first
 
-from mymme.data import load_dictionary
+from mymme.data import load_dictionary, MEDataset
 
 
 random.seed(42)
@@ -38,7 +38,7 @@ def save_data(data, modality, split):
 
 def deduplicate(data: List[Dict]) -> List[Dict]:
     keys = data[0].keys()
-    data1 = [datum.values() for datum in data]
+    data1 = [tuple(datum.values()) for datum in data]
     data1 = set(data1)
     return [dict(zip(keys, datum)) for datum in data1]
 
@@ -82,21 +82,128 @@ def prepare_image_filelist(split):
     save_data(data_image, "image", split)
 
 
-def prepare_pairs_filelist(split, langs, num_word_repeat):
-    from mymme.data import MEDataset
+def prepare_test_filelist():
+    def unpack_datum(datum):
+        word, image_path, audio_path, image_source = datum
+        entry_image = {
+            "name": image_path.stem,
+            "word-en": word,
+            "source": image_source,
+        }
+        entry_audio = {
+            "lang": "english",
+            "name": audio_path.stem,
+            "word-en": word,
+        }
+        return entry_audio, entry_image
 
-    assert split in ["train", "valid"]
+    path = "mme/data/episodes.npz"
+    data = np.load(path, allow_pickle=True)["episodes"].item()
+
+    data_out = [
+        unpack_datum(datum4)
+        for datum1 in data.values()
+        for datum2 in datum1.values()
+        for datum3 in datum2.values()
+        for datum4 in datum3
+    ]
+
+    data_audio, data_image = zip(*data_out)
+    data_audio = deduplicate(data_audio)
+    data_image = deduplicate(data_image)
+
+    # Sanity check (seems good!)
+
+    # def extract_names(data):
+    #     data1 = data.item().values()
+    #     return [datum2.stem for datum1 in data1 for datum2 in datum1]
+
+    # path = "mme/results/files/episode_data.npz"
+    # data = np.load(path, allow_pickle=True)
+
+    # audio_names = extract_names(data["audio_1"]) + extract_names(data["audio_2"])
+    # audio_names = set(audio_names)
+    # image_names = extract_names(data["image_1"]) + extract_names(data["image_2"])
+    # image_names = set(image_names)
+
+    # print(len(audio_names), len(image_names))
+    # print(len(data_audio), len(data_image))
+
+    # assert audio_names == set([d["name"] for d in data_audio])
+    # assert image_names == set([d["name"] for d in data_image])
+    # pdb.set_trace()
+
+    save_data(data_audio, "audio", "test")
+    save_data(data_image, "image", "test")
+
+
+def prepare_familiar_familiar(split, num_word_repeat):
+    # split = "test"
+    assert split in ("train", "valid", "test")
+    langs = ("english",)
     dataset = MEDataset(split, langs)
 
-    def sample_neg(data, word):
+    def sample_neg_train_valid(data, image_pos):
+        word = image_pos["word-en"]
         words = set(dataset.words_seen) - set([word])
-        word = random.choice(list(words))
-        return random.choice(data[word])
+        word_other = random.choice(list(words))
+        return random.choice(data[word_other])
+
+    def sample_neg_test(data, image_pos):
+        data1 = [
+            datum
+            for word in dataset.words_seen
+            if word != image_pos["word-en"]
+            for datum in data[word]
+            if datum["source"] == image_pos["source"]
+        ]
+        return random.choice(data1)
+
+    SAMPLE_NEGS = {
+        "train": sample_neg_train_valid,
+        "valid": sample_neg_train_valid,
+        "test": sample_neg_test,
+    }
+    sample_neg = SAMPLE_NEGS[split]
 
     def sample_pair(word):
         audio = random.choice(dataset.word_to_audios[word])
         image_pos = random.choice(dataset.word_to_images[word])
-        image_neg = sample_neg(dataset.word_to_images, word)
+        image_neg = sample_neg(dataset.word_to_images, image_pos)
+        return {
+            "audio": audio,
+            "image-pos": image_pos,
+            "image-neg": image_neg,
+        }
+
+    data = [
+        sample_pair(word) for word in dataset.words_seen for _ in range(num_word_repeat)
+    ]
+
+    with open(f"mymme/data/filelists/familiar-familiar-{split}.json", "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def prepare_novel_familiar(num_word_repeat):
+    split = "test"
+    langs = ("english",)
+    dataset = MEDataset(split, langs)
+
+    def sample_neg(data, image_pos):
+        data1 = [
+            datum
+            for word in dataset.words_seen
+            for datum in data[word]
+            if datum["source"] == image_pos["source"]
+        ]
+        datum = random.choice(data1)
+        assert datum["word-en"] != image_pos["word-en"]
+        return datum
+
+    def sample_pair(word):
+        audio = random.choice(dataset.word_to_audios[word])
+        image_pos = random.choice(dataset.word_to_images[word])
+        image_neg = sample_neg(dataset.word_to_images, image_pos)
         return {
             "audio": audio,
             "image-pos": image_pos,
@@ -105,11 +212,11 @@ def prepare_pairs_filelist(split, langs, num_word_repeat):
 
     data = [
         sample_pair(word)
-        for word in dataset.words_seen
+        for word in dataset.words_unseen
         for _ in range(num_word_repeat)
     ]
 
-    with open(f"mymme/data/filelists/pairs-{split}.json", "w") as f:
+    with open(f"mymme/data/filelists/novel-familiar-{split}.json", "w") as f:
         json.dump(data, f, indent=2)
 
 
@@ -118,4 +225,5 @@ if __name__ == "__main__":
     # prepare_audio_filelist("valid")
     # prepare_image_filelist("train")
     # prepare_image_filelist("valid")
-    prepare_pairs_filelist("valid", ("english", ), 10)
+    # prepare_familiar_familiar("test", 10)
+    prepare_novel_familiar(10)
