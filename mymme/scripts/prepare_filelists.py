@@ -220,10 +220,72 @@ def prepare_novel_familiar(num_word_repeat):
         json.dump(data, f, indent=2)
 
 
+def extract_filelists_from_leanne():
+    dataset = MEDataset("test", langs=("english",))
+
+    path = "mme/results/files/episode_data.npz"
+    data = np.load(path, allow_pickle=True)
+
+    audio = data["audio_1"].item()
+    audio_words = data["audio_labels_1"].item()
+
+    image_pos = data["image_1"].item()
+    image_pos_words = data["image_labels_1"].item()
+
+    image_neg = data["image_2"].item()
+    image_neg_words = data["image_labels_2"].item()
+
+    episodes = list(range(1000))
+    episodes = random.sample(episodes, 30)
+
+    data = [
+        {
+            "audio": {
+                "name": audio[e][i].stem,
+                "word-en": audio_words[e][i],
+                "lang": "english",
+            },
+            "image-pos": {
+                "name": image_pos[e][i].stem,
+                "word-en": image_pos_words[e][i],
+            },
+            "image-neg": {
+                "name": image_neg[e][i].stem,
+                "word-en": image_neg_words[e][i],
+            },
+        }
+        for e in episodes
+        for i in range(33)
+    ]
+
+    data_ff = [
+        datum
+        for datum in data
+        if datum["audio"]["word-en"] in dataset.words_seen
+        and datum["image-pos"]["word-en"] in dataset.words_seen
+        and datum["image-neg"]["word-en"] in dataset.words_seen
+    ]
+
+    data_nf = [
+        datum
+        for datum in data
+        if datum["audio"]["word-en"] in dataset.words_unseen
+        and datum["image-pos"]["word-en"] in dataset.words_unseen
+        and datum["image-neg"]["word-en"] in dataset.words_seen
+    ]
+
+    with open("mymme/data/filelists/leanne-familiar-familiar-test.json", "w") as f:
+        json.dump(data_ff, f, indent=2)
+
+    with open("mymme/data/filelists/leanne-novel-familiar-test.json", "w") as f:
+        json.dump(data_nf, f, indent=2)
+
+
 if __name__ == "__main__":
     # prepare_audio_filelist("train")
     # prepare_audio_filelist("valid")
     # prepare_image_filelist("train")
     # prepare_image_filelist("valid")
     # prepare_familiar_familiar("test", 10)
-    prepare_novel_familiar(10)
+    # prepare_novel_familiar(10)
+    extract_filelists_from_leanne()
