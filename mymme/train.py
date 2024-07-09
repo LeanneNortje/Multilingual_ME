@@ -248,11 +248,11 @@ def train(config_name: str):
 
     optimizer = optim.Adam(model.parameters(), **config["optimizer"])
     # optimizer = optim.Adam(
-    # [
-    # {"params": model.audio_enc.parameters(), "name": "audio-enc"},
-    # {"params": model.image_enc.parameters(), "name": "image-enc"},
-    # ],
-    # **config["optimizer"],
+    #     [
+    #         {"params": model.audio_enc.parameters(), "name": "audio-enc"},
+    #         {"params": model.image_enc.parameters(), "name": "image-enc"},
+    #     ],
+    #     **config["optimizer"],
     # )
 
     metrics = {
