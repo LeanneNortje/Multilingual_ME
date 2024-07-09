@@ -207,7 +207,7 @@ class MattNet(nn.Module):
     def l2_normalize(self, x, dim):
         return x / x.norm(dim=dim, keepdim=True)
 
-    def score(self, audio, image, type):
+    def score(self, audio_emb, image_emb, type):
         # def compute1(a, i):
         #     att = torch.bmm(a.unsqueeze(0).transpose(1, 2), i.unsqueeze(0))
         #     s = att.max()
@@ -219,8 +219,8 @@ class MattNet(nn.Module):
         }
         op = EINSUM_OP[type]
 
-        audio_embedding = self.audio_enc(audio)
-        image_embedding = self.image_enc(image)
+        # audio_embedding = self.audio_enc(audio)
+        # image_embedding = self.image_enc(image)
 
         # sim = torch.stack([torch.stack([compute1(a, i) for i in image_embedding]) for a in audio_embedding])
         # sim = torch.cat(att).to(audio.device)
@@ -228,7 +228,7 @@ class MattNet(nn.Module):
         # audio_embedding = self.l2_normalize(audio_embedding, dim=1)
         # image_embedding = self.l2_normalize(image_embedding, dim=1)
 
-        sim = torch.einsum(op, audio_embedding, image_embedding)
+        sim = torch.einsum(op, audio_emb, image_emb)
         sim, _ = sim.max(dim=-1)
         sim, _ = sim.max(dim=-1)
 
@@ -282,6 +282,22 @@ class MattNet(nn.Module):
 
         true = torch.zeros(2 * B).to(labels.device).long()
         return F.cross_entropy(pred, true)
+
+    def predict_paired_test(self, audio, image_pos, image_neg):
+        """Input shapes:
+
+        - audio:      B × D × T
+        - image-pos:  B × 3 × H × W
+        - image-neg:  B × 3 × H × W
+
+        """
+        audio_emb = self.audio_enc(audio)
+        image_pos_emb = self.image_enc(image_pos)
+        image_neg_emb = self.image_enc(image_neg)
+        scores_pos = self.score(audio_emb, image_pos_emb, type="pair")
+        scores_neg = self.score(audio_emb, image_neg_emb, type="pair")
+        scores = torch.stack([scores_pos, scores_neg], dim=1)
+        return F.softmax(scores, dim=1)
 
 
 

@@ -12,7 +12,7 @@ from ignite.engine import Events, create_supervised_trainer, create_supervised_e
 from ignite.handlers import ModelCheckpoint, create_lr_scheduler_with_warmup
 from ignite.handlers.early_stopping import EarlyStopping
 from ignite.handlers.param_scheduler import CosineAnnealingScheduler
-from ignite.metrics import Loss, RunningAverage
+from ignite.metrics import Accuracy, Loss, RunningAverage
 from ignite.utils import convert_tensor, manual_seed
 
 from ignite.handlers.tensorboard_logger import (
@@ -20,164 +20,9 @@ from ignite.handlers.tensorboard_logger import (
     global_step_from_engine,
 )
 
-from mymme.data import setup_data
+from mymme.config import CONFIGS
+from mymme.data import setup_data, setup_data_paired_test
 from mymme.model import setup_model
-
-
-CONFIGS = {
-    "00": {
-        "seed": 42,
-        "device": "cuda",
-        "max_epochs": 50,
-        # "epoch_length": 500,
-        "n_saved": 3,
-        "patience": 5,
-        "log_every_iters": 5,
-        "optimizer": {
-            "lr": 0.0001,
-            "weight_decay": 5e-7,
-        },
-        "data": {
-            "langs": ("english",),
-            "num_pos": 32,
-            "num_neg": 256,
-            "num_workers": 32,
-            "num_word_repeats": 64,
-            "to_shuffle": True,
-        },
-        "model": {
-            "model_name": "mattnet",
-            "audio_encoder_kwargs": {
-                "use_pretrained_cpc": False,
-            },
-            "image_encoder_kwargs": {
-                "embedding_dim": 2048,
-                "use_pretrained_alexnet": True,
-            },
-        },
-    },
-    "01": {
-        "seed": 42,
-        "device": "cuda",
-        "max_epochs": 50,
-        # "epoch_length": 500,
-        "n_saved": 3,
-        "patience": 5,
-        "log_every_iters": 5,
-        "optimizer": {
-            "lr": 0.0001,
-            "weight_decay": 5e-7,
-        },
-        "data": {
-            "langs": ("english",),
-            "num_pos": 32,
-            "num_neg": 256,
-            "num_workers": 32,
-            "num_word_repeats": 64,
-            "to_shuffle": False,
-        },
-        "model": {
-            "model_name": "mattnet",
-            "audio_encoder_kwargs": {
-                "use_pretrained_cpc": False,
-            },
-            "image_encoder_kwargs": {
-                "embedding_dim": 2048,
-                "use_pretrained_alexnet": True,
-            },
-        },
-    },
-    "02": {
-        "seed": 42,
-        "device": "cuda",
-        "max_epochs": 5,
-        "n_saved": 3,
-        "patience": 5,
-        "log_every_iters": 5,
-        "optimizer": {
-            "lr": 0.0001,
-            "weight_decay": 5e-7,
-        },
-        "data": {
-            "langs": ("english",),
-            "num_pos": 8,
-            "num_neg": 32,
-            "num_workers": 32,
-            "to_shuffle": False,
-        },
-        "model": {
-            "model_name": "mattnet",
-            "audio_encoder_kwargs": {
-                "use_pretrained_cpc": False,
-            },
-            "image_encoder_kwargs": {
-                "embedding_dim": 2048,
-                "use_pretrained_alexnet": True,
-            },
-        },
-    },
-    "03": {
-        "seed": 42,
-        "device": "cuda",
-        "max_epochs": 5,
-        "n_saved": 3,
-        "patience": 5,
-        "log_every_iters": 5,
-        "optimizer": {
-            "lr": 0.0001,
-            "weight_decay": 5e-7,
-        },
-        "data": {
-            "langs": ("english",),
-            "num_pos": 1,
-            "num_neg": 9,
-            "num_workers": 32,
-            "batch_size": 12,
-            "to_shuffle": True,
-        },
-        "model": {
-            "model_name": "mattnet",
-            "audio_encoder_kwargs": {
-                "use_pretrained_cpc": False,
-            },
-            "image_encoder_kwargs": {
-                "embedding_dim": 2048,
-                "use_pretrained_alexnet": True,
-            },
-        },
-    },
-    "04": {
-        "seed": 42,
-        "device": "cuda",
-        "max_epochs": 12,
-        "warmup_epochs": 2,
-        "n_saved": 5,
-        # "patience": 5,
-        "log_every_iters": 5,
-        "optimizer": {
-            "lr": 3e-4,
-            "weight_decay": 5e-7,
-        },
-        "data": {
-            "langs": ("english",),
-            "num_pos": 1,
-            "num_neg": 11,
-            "num_workers": 32,
-            "batch_size": 32,
-            "to_shuffle": True,
-        },
-        "model": {
-            "model_name": "mattnet",
-            "audio_encoder_kwargs": {
-                "use_pretrained_cpc": False,
-            },
-            "image_encoder_kwargs": {
-                "embedding_dim": 2048,
-                "use_pretrained_alexnet": True,
-            },
-        },
-    },
-}
 
 
 def identity_loss(loss, _):
@@ -229,6 +74,34 @@ def model_fn(model, inp):
     return model.compute_loss(audio, image, labels)
 
 
+def create_supervised_evaluator_paired_test(model, device, test_name):
+    metrics = {f"accuracy-{test_name}": Accuracy()}
+
+    def prepare_batch_fn(batch, device, non_blocking):
+        B, *_ = batch["audio"].shape
+        batch = {k: convert_tensor(v, device, non_blocking) for k, v in batch.items()}
+        inp = batch["audio"], batch["image-pos"], batch["image-neg"]
+        out = torch.zeros(B, device=device, dtype=torch.long)
+        return inp, out
+
+    def model_fn(model, inp):
+        audio, image_pos, image_neg = inp
+        return model.predict_paired_test(audio, image_pos, image_neg)
+
+    def output_transform(x, y, y_pred):
+        y_pred = y_pred.argmax(dim=1)
+        return y_pred, y
+
+    return create_supervised_evaluator(
+        model,
+        prepare_batch=prepare_batch_fn,
+        model_fn=model_fn,
+        device=device,
+        output_transform=output_transform,
+        metrics=metrics,
+    )
+
+
 @click.command()
 @click.argument("config_name", type=str)
 def train(config_name: str):
@@ -241,6 +114,7 @@ def train(config_name: str):
     # config.output_dir = output_dir
 
     dataloader_train, dataloader_valid = setup_data(**config["data"])
+    dataloader_ff, dataloader_nf = setup_data_paired_test(batch_size=64, num_workers=4)
 
     device = config["device"]
     model = setup_model(**config["model"])
@@ -273,10 +147,18 @@ def train(config_name: str):
         prepare_batch=prepare_batch_fn,
         model_fn=model_fn,
         device=device,
+        metrics=metrics,
     )
-
-    for name, metric in metrics.items():
-        metric.attach(evaluator, name)
+    evaluator_ff = create_supervised_evaluator_paired_test(
+        model,
+        device,
+        test_name="familiar-familiar",
+    )
+    evaluator_nf = create_supervised_evaluator_paired_test(
+        model,
+        device,
+        test_name="novel-familiar",
+    )
 
     # Model checkpoint
     def score_func(engine):
@@ -306,22 +188,15 @@ def train(config_name: str):
 
     # Print metrics to the stderr with `add_event_handler` API for training stats
     def print_metrics(engine, tag):
-        if tag == "train":
-            metrics_str = "loss: {:.3f} · loss avg: {:.3f} ◇ lr: {:f}".format(
-                engine.state.output,
-                engine.state.metrics["running-average-loss"],
-                optimizer.param_groups[0]["lr"],
-            )
-        elif tag == "valid":
-            metrics_str = "loss: {:.3f}".format(engine.state.metrics["loss"])
-        else:
-            assert False, "Unknown tag"
+        assert tag == "train"
         print(
-            "{:s} · {:4d} / {:4d} · {:s}".format(
+            "{:s} · {:4d} / {:4d} · loss: {:.3f} · loss avg: {:.3f} ◇ lr: {:f}".format(
                 tag,
                 engine.state.epoch,
                 engine.state.iteration,
-                metrics_str,
+                engine.state.output,
+                engine.state.metrics["running-average-loss"],
+                optimizer.param_groups[0]["lr"],
             )
         )
 
@@ -352,10 +227,23 @@ def train(config_name: str):
     # Run evaluation at every training epoch end with shortcut `on` decorator
     # API and print metrics to the stderr again with `add_event_handler` API for
     # evaluation stats.
-    @trainer.on(Events.EPOCH_COMPLETED(every=1))
+    EVENT_EVAL = Events.STARTED | Events.EPOCH_COMPLETED(every=1)
+
+    @trainer.on(EVENT_EVAL)
     def _():
+        evaluator_ff.run(dataloader_ff)
+        evaluator_nf.run(dataloader_nf)
         evaluator.run(dataloader_valid)
-        print_metrics(evaluator, "valid")
+        print(
+            "{:s} · {:4d} / {:4d} · loss: {:.3f} ◇ FF: {:.3f} · NF: {:.3f}".format(
+                "eval.",
+                trainer.state.epoch,
+                trainer.state.iteration,
+                evaluator.state.metrics["loss"],
+                evaluator_ff.state.metrics["accuracy-familiar-familiar"],
+                evaluator_nf.state.metrics["accuracy-novel-familiar"],
+            )
+        )
 
     # Create a logger
     log_dir = output_dir / "tb-logs"
@@ -371,10 +259,32 @@ def train(config_name: str):
 
     tb_logger.attach_output_handler(
         evaluator,
-        event_name=Events.EPOCH_COMPLETED,
+        event_name=EVENT_EVAL,
         tag="valid",
         metric_names=["loss"],
         global_step_transform=global_step_from_engine(trainer),
+    )
+
+    tb_logger.attach_output_handler(
+        evaluator_ff,
+        event_name=EVENT_EVAL,
+        tag="test",
+        metric_names=["accuracy-familiar-familiar"],
+        global_step_transform=global_step_from_engine(trainer),
+    )
+
+    tb_logger.attach_output_handler(
+        evaluator_nf,
+        event_name=EVENT_EVAL,
+        tag="test",
+        metric_names=["accuracy-novel-familiar"],
+        global_step_transform=global_step_from_engine(trainer),
+    )
+
+    tb_logger.attach_opt_params_handler(
+        trainer,
+        event_name=Events.ITERATION_STARTED,
+        optimizer=optimizer,
     )
 
     tb_logger.close()

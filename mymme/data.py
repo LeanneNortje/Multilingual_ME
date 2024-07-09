@@ -1,6 +1,7 @@
 from itertools import groupby
 from typing import Literal, Tuple
 
+import json
 import random
 import pdb
 
@@ -171,7 +172,11 @@ class PairedMEDataset(Dataset):
         # self.words = [word for word in words_seen for _ in range(num_word_repeats)]
 
         # Use Leanne's order
-        self.word_audio = [(word, audio) for word, audios in self.dataset.word_to_audios.items() for audio in audios]
+        self.word_audio = [
+            (word, audio)
+            for word, audios in self.dataset.word_to_audios.items()
+            for audio in audios
+        ]
         self.word_audio = sorted(self.word_audio, key=lambda x: x[0])
 
         if to_shuffle and split == "train":
@@ -220,14 +225,62 @@ class PairedMEDataset(Dataset):
         return len(self.word_audio)
 
 
+class PairedTestDataset(Dataset):
+    def __init__(self, test_name):
+        assert test_name in {"familiar-familiar", "novel-familiar"}
+        super(PairedTestDataset).__init__()
+
+        with open(f"mymme/data/filelists/{test_name}-test.json", "r") as f:
+            self.data_pairs = json.load(f)
+
+    def __getitem__(self, index: int):
+        datum = self.data_pairs[index]
+        assert datum["audio"]["word-en"] == datum["image-pos"]["word-en"]
+        assert datum["audio"]["word-en"] != datum["image-neg"]["word-en"]
+        return {
+            "audio": load_audio(datum["audio"]),
+            "image-pos": load_image(datum["image-pos"]),
+            "image-neg": load_image(datum["image-neg"]),
+        }
+
+    def __len__(self):
+        return len(self.data_pairs)
+
+
 def setup_data(*, num_workers, batch_size, **dataset_kwargs):
     train_dataset = PairedMEDataset(split="train", **dataset_kwargs)
     valid_dataset = PairedMEDataset(split="valid", **dataset_kwargs)
 
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, num_workers=num_workers)
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+    )
+    valid_dataloader = DataLoader(
+        valid_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+    )
 
     return train_dataloader, valid_dataloader
+
+
+def setup_data_paired_test(*, num_workers, batch_size):
+    dataset_ff = PairedTestDataset("familiar-familiar")
+    dataset_nf = PairedTestDataset("novel-familiar")
+
+    dataloader_ff = DataLoader(
+        dataset_ff,
+        batch_size=batch_size,
+        num_workers=num_workers,
+    )
+    dataloader_nf = DataLoader(
+        dataset_nf,
+        batch_size=batch_size,
+        num_workers=num_workers,
+    )
+
+    return dataloader_ff, dataloader_nf
 
 
 def my_collate_fn(batch):
@@ -248,7 +301,9 @@ if __name__ == "__main__":
         # num_word_repeats=5,
     )
     dataloader = DataLoader(dataset, num_workers=4)
-    import pdb; pdb.set_trace()
+    import pdb
+
+    pdb.set_trace()
     for batch in dataloader:
         # print(batch["image"][0, 0, :3, :3])
         pdb.set_trace()
