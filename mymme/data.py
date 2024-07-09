@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, Dataset, IterableDataset, default_colla
 from torch.nn.utils.rnn import pad_sequence
 
 from PIL import Image
-from torchvision import transforms
+from torchvision import transforms as T
 
 from toolz import concat, dissoc
 from mymme.utils import read_file, read_json
@@ -37,16 +37,42 @@ def load_dictionary():
     return read_file("mymme/data/concepts.txt", parse_line)
 
 
-transform_image = transforms.Compose(
+IMAGE_SIZE = 256
+
+transform_image_norm = T.Normalize(
+    mean=[0.485, 0.456, 0.406],
+    std=[0.229, 0.224, 0.225],
+)
+
+transform_image_train_1 = T.Compose(
     [
-        transforms.Resize((256, 256)),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225],
-        ),
+        T.RandomAffine(scale=(0.75, 1.00), degrees=5, fill=255),
+        T.RandomResizedCrop(IMAGE_SIZE, scale=(0.75, 1.00)),
+        T.RandomHorizontalFlip(),
     ]
 )
+
+transform_image_train = T.Compose(
+    [
+        transform_image_train_1,
+        T.ToTensor(),
+        transform_image_norm,
+    ]
+)
+
+transform_image_test = T.Compose(
+    [
+        T.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+        T.ToTensor(),
+        transform_image_norm,
+    ]
+)
+
+TRANSFORM_IMAGE = {
+    "train": transform_image_train,
+    "valid": transform_image_test,
+    "test": transform_image_test,
+}
 
 
 def get_image_path(datum: dict):
@@ -60,7 +86,7 @@ def get_audio_path(datum: dict):
     return f"data/{lang}_words/{name}.wav"
 
 
-def load_image(datum: dict) -> torch.Tensor:
+def load_image(datum: dict, transform_image=transform_image_test) -> torch.Tensor:
     path = get_image_path(datum)
     img = Image.open(path).convert("RGB")
     return transform_image(img)
@@ -145,6 +171,9 @@ class MEDataset:
         audio_files = read_json(f"mymme/data/filelists/audio-{split}.json")
         audio_files = [datum for datum in audio_files if datum["lang"] in langs]
 
+        self.image_files = image_files
+        self.audio_files = audio_files
+
         self.word_to_images = group_by_word(image_files)
         self.word_to_audios = group_by_word(audio_files)
 
@@ -162,6 +191,7 @@ class PairedMEDataset(Dataset):
         super(PairedMEDataset).__init__()
 
         assert split in ("train", "valid")
+        self.split = split
         self.dataset = MEDataset(split, langs)
 
         self.n_pos = num_pos
@@ -188,6 +218,8 @@ class PairedMEDataset(Dataset):
         # print("index: ", i)
         # print()
 
+        transform_image = TRANSFORM_IMAGE[self.split]
+
         def sample_neg(data, word):
             words = set(self.dataset.words_seen) - set([word])
             words = random.choices(list(words), k=self.n_neg)
@@ -200,7 +232,7 @@ class PairedMEDataset(Dataset):
 
         data_pos = [
             {
-                "image": load_image(image_name),
+                "image": load_image(image_name, transform_image),
                 "audio": load_audio(audio_name),
                 "label": 1,
             }
@@ -212,7 +244,7 @@ class PairedMEDataset(Dataset):
 
         data_neg = [
             {
-                "image": load_image(image_name),
+                "image": load_image(image_name, transform_image),
                 "audio": load_audio(audio_name),
                 "label": 0,
             }
