@@ -227,9 +227,7 @@ def train(config_name: str):
     # Run evaluation at every training epoch end with shortcut `on` decorator
     # API and print metrics to the stderr again with `add_event_handler` API for
     # evaluation stats.
-    EVENT_EVAL = Events.STARTED | Events.EPOCH_COMPLETED(every=1)
-
-    @trainer.on(EVENT_EVAL)
+    @trainer.on(Events.STARTED | Events.EPOCH_COMPLETED(every=1))
     def _():
         evaluator_ff.run(dataloader_ff)
         evaluator_nf.run(dataloader_nf)
@@ -259,7 +257,7 @@ def train(config_name: str):
 
     tb_logger.attach_output_handler(
         evaluator,
-        event_name=EVENT_EVAL,
+        event_name=Events.COMPLETED,
         tag="valid",
         metric_names=["loss"],
         global_step_transform=global_step_from_engine(trainer),
@@ -267,7 +265,7 @@ def train(config_name: str):
 
     tb_logger.attach_output_handler(
         evaluator_ff,
-        event_name=EVENT_EVAL,
+        event_name=Events.COMPLETED,
         tag="test",
         metric_names=["accuracy-familiar-familiar"],
         global_step_transform=global_step_from_engine(trainer),
@@ -275,7 +273,7 @@ def train(config_name: str):
 
     tb_logger.attach_output_handler(
         evaluator_nf,
-        event_name=EVENT_EVAL,
+        event_name=Events.COMPLETED,
         tag="test",
         metric_names=["accuracy-novel-familiar"],
         global_step_transform=global_step_from_engine(trainer),
