@@ -124,7 +124,7 @@ def score_pair(model, datum, device):
 
 
 def evaluate_model(test_name, model, device):
-    with open(f"mymme/data/filelists/{test_name}-test.json") as f:
+    with open(f"mymme/data/filelists/{test_name}-test.json", "r") as f:
         data_pairs = json.load(f)
 
     results = [score_pair(model, datum, device) for datum in tqdm(data_pairs)]
