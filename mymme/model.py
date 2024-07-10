@@ -5,6 +5,17 @@ from torch.nn import functional as F
 from torchvision.models import alexnet
 
 
+AUDIO_POOLING_LAYERS = {
+    "average": lambda **kwargs: nn.AdaptiveAvgPool1d(1),
+    "two-layer-mlp": lambda frame_dim: nn.Sequential(
+        nn.Linear(frame_dim // 2, frame_dim // 4),
+        nn.LeakyReLU(),
+        nn.Linear(frame_dim // 4, 1),
+        nn.LeakyReLU(),
+    ),
+}
+
+
 class AudioEncoder(nn.Module):
     def __init__(
         self,
@@ -18,6 +29,7 @@ class AudioEncoder(nn.Module):
         c_dim=512,
         frame_dim=256,
         use_pretrained_cpc=False,
+        pooling_layer="two-layer-mlp",
     ):
         super(AudioEncoder, self).__init__()
 
@@ -60,12 +72,8 @@ class AudioEncoder(nn.Module):
         self.english_rnn1 = nn.LSTM(512, 512, batch_first=True, bidirectional=True)
         self.english_rnn2 = nn.LSTM(1024, 1024, batch_first=True, bidirectional=True)
         self.relu = nn.ReLU()
-        self.audio_encoder = nn.Sequential(
-            nn.Linear(frame_dim // 2, frame_dim // 4),
-            nn.LeakyReLU(),
-            nn.Linear(frame_dim // 4, 1),
-            nn.LeakyReLU(),
-        )
+
+        self.pooling_layer = AUDIO_POOLING_LAYERS[pooling_layer](frame_dim=frame_dim)
 
         if use_pretrained_cpc:
 
@@ -91,9 +99,12 @@ class AudioEncoder(nn.Module):
             self.load_state_dict(model_dict)
 
     def forward(self, mels):
+        # mels: B × D × T
         z = self.conv(mels)
         z = self.relu(z)
-        z = self.encoder(z.transpose(1, 2))
+
+        z = z.transpose(1, 2)  # B × T × D
+        z = self.encoder(z)
 
         c, _ = self.rnn1(z)
         c, _ = self.rnn2(c)
@@ -102,8 +113,9 @@ class AudioEncoder(nn.Module):
 
         s, _ = self.english_rnn1(c)
         s, _ = self.english_rnn2(s)
-        s = s.transpose(1, 2)
-        s = self.audio_encoder(s)
+
+        s = s.transpose(1, 2)  # B × D × T
+        s = self.pooling_layer(s)
 
         # return z, z, s
         return s
