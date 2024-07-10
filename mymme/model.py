@@ -207,7 +207,12 @@ class MattNet(nn.Module):
     def l2_normalize(self, x, dim):
         return x / x.norm(dim=dim, keepdim=True)
 
-    def score(self, audio_emb, image_emb, type):
+    def score(self, audio, image, type):
+        audio_emb = self.audio_enc(audio)
+        image_emb = self.image_enc(image)
+        return self.score_emb(audio_emb, image_emb, type)
+
+    def score_emb(self, audio_emb, image_emb, type):
         # def compute1(a, i):
         #     att = torch.bmm(a.unsqueeze(0).transpose(1, 2), i.unsqueeze(0))
         #     s = att.max()
@@ -294,11 +299,10 @@ class MattNet(nn.Module):
         audio_emb = self.audio_enc(audio)
         image_pos_emb = self.image_enc(image_pos)
         image_neg_emb = self.image_enc(image_neg)
-        scores_pos = self.score(audio_emb, image_pos_emb, type="pair")
-        scores_neg = self.score(audio_emb, image_neg_emb, type="pair")
+        scores_pos = self.score_emb(audio_emb, image_pos_emb, type="pair")
+        scores_neg = self.score_emb(audio_emb, image_neg_emb, type="pair")
         scores = torch.stack([scores_pos, scores_neg], dim=1)
         return F.softmax(scores, dim=1)
-
 
 
 MODELS = {
