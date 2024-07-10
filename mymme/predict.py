@@ -146,9 +146,7 @@ def evaluate_model(test_name, model, device):
 #     to_drop_prefix=True,
 # )
 
-MODELS = {
-    "04": lambda: load_model("04", CONFIGS["04"]),
-}
+MODELS = {k: partial(load_model, k, config) for k, config in CONFIGS.items()}
 
 for i in range(1, 4):
     MODELS[f"b4b77a981b/{i}"] = partial(
