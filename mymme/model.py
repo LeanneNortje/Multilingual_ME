@@ -120,7 +120,9 @@ class AudioEncoder(nn.Module):
             self.load_state_dict(model_dict)
 
     def forward(self, mels, lengths):
-        mels = mels.transpose(1, 2)  # B × D × T
+        # mels: B × D × T
+
+        # mels = mels.transpose(1, 2)  # B × D × T
 
         z = self.conv(mels)
         z = self.relu(z)
@@ -244,14 +246,14 @@ class MattNet(nn.Module):
         self.image_enc = ImageEncoder(**image_encoder_kwargs)
         # self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / 0.07)))
 
-    def forward(self, audio, image):
-        return self.score(audio, image, type="cross")
+    # def forward(self, audio, image):
+    #     return self.score(audio, image, type="cross")
 
     def l2_normalize(self, x, dim):
         return x / x.norm(dim=dim, keepdim=True)
 
-    def score(self, audio, image, type):
-        audio_emb = self.audio_enc(audio)
+    def score(self, audio, audio_length, image, type):
+        audio_emb = self.audio_enc(audio, audio_length)
         image_emb = self.image_enc(image)
         return self.score_emb(audio_emb, image_emb, type)
 

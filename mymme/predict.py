@@ -9,10 +9,13 @@ from tqdm import tqdm
 import streamlit as st
 import torch
 
-from mymme.train import CONFIGS, setup_model
+from torch.utils.data import DataLoader
+
+from mymme.train import CONFIGS, setup_model, UtilsPairedTest
 from mymme.data import (
-    MEDataset,
     PairedMEDataset,
+    PairedTestDataset,
+    collate_with_audio,
     get_audio_path,
     get_image_path,
     load_audio,
@@ -108,9 +111,12 @@ def score_pair(model, datum, device):
     assert datum["audio"]["word-en"] == datum["image-pos"]["word-en"]
     assert datum["audio"]["word-en"] != datum["image-neg"]["word-en"]
 
+    audio_length = torch.tensor([audio.size(2)])
+    audio_length = audio_length.to(device)
+
     with torch.no_grad():
-        score_pos = model.score(audio, image_pos, "pair")
-        score_neg = model.score(audio, image_neg, "pair")
+        score_pos = model.score(audio, audio_length, image_pos, "pair")
+        score_neg = model.score(audio, audio_length, image_neg, "pair")
 
     is_correct = score_pos > score_neg
     is_correct = bool(is_correct)
@@ -121,6 +127,29 @@ def score_pair(model, datum, device):
         "is-correct": is_correct,
         **datum,
     }
+
+
+def evaluate_model_batched(test_name, model, device):
+    dataset = PairedTestDataset(test_name)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=128,
+        num_workers=4,
+        collate_fn=collate_with_audio,
+    )
+    model_fn = UtilsPairedTest.model_fn
+    prepare_batch_fn = UtilsPairedTest.prepare_batch_fn
+    with torch.no_grad():
+        preds = [
+            model_fn(
+                model,
+                prepare_batch_fn(batch, device, non_blocking=True)[0],
+            )
+            for batch in tqdm(dataloader)
+        ]
+    preds = torch.cat(preds, dim=0)
+    is_correct = (preds[:, 0] > preds[:, 1]).float()
+    return 100 * torch.mean(is_correct).item()
 
 
 def evaluate_model(test_name, model, device):

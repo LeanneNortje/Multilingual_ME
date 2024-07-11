@@ -150,6 +150,7 @@ def load_audio(datum: dict):
     # logspec = pad_to_length(logspec, CONFIG["target-length"], CONFIG["pad-value"])
     # logspec = logspec.T
 
+    # D × T
     return torch.tensor(logspec)
 
 
@@ -261,7 +262,7 @@ class PairedMEDataset(Dataset):
 
 class PairedTestDataset(Dataset):
     def __init__(self, test_name):
-        assert test_name in {"familiar-familiar", "novel-familiar"}
+        # assert test_name in {"familiar-familiar", "novel-familiar"}
         super(PairedTestDataset).__init__()
 
         with open(f"mymme/data/filelists/{test_name}-test.json", "r") as f:
@@ -318,11 +319,12 @@ def setup_data_paired_test(*, num_workers, batch_size):
 
 
 def collate_with_audio(batch):
-    audios = pad_sequence([datum["audio"].T for datum in batch], batch_first=True)
-    lengths = torch.tensor([datum["audio"].shape[1] for datum in batch])
+    audio = pad_sequence([datum["audio"].T for datum in batch], batch_first=True)
+    audio = audio.permute(0, 2, 1)
+    audio_length = torch.tensor([datum["audio"].shape[1] for datum in batch])
     rest = [dissoc(datum, "audio") for datum in batch]
     rest = default_collate(rest)
-    return {"audio": audios, "audio-length": lengths, **rest}
+    return {"audio": audio, "audio-length": audio_length, **rest}
 
 
 def collate_nested(batch):

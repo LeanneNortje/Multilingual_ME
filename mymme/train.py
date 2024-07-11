@@ -62,39 +62,50 @@ def identity_loss(loss, _):
 # return (loss1 + loss2) / 2
 
 
-def prepare_batch_fn(batch, device, non_blocking):
-    batch = {k: convert_tensor(v, device, non_blocking) for k, v in batch.items()}
-    inp = batch["audio"], batch["audio-length"], batch["image"], batch["label"]
-    out = batch["label"]
-    return inp, out
+class UtilsTraining:
+    @staticmethod
+    def prepare_batch_fn(batch, device, non_blocking):
+        batch = {k: convert_tensor(v, device, non_blocking) for k, v in batch.items()}
+        inp = batch["audio"], batch["audio-length"], batch["image"], batch["label"]
+        out = batch["label"]
+        return inp, out
+
+    @staticmethod
+    def model_fn(model, inputs):
+        return model.compute_loss(*inputs)
+
+    @staticmethod
+    def get_metrics(device):
+        return {"loss": Loss(identity_loss, device=device)}
 
 
-
-def create_supervised_evaluator_paired_test(model, device, test_name):
-    metrics = {f"accuracy-{test_name}": Accuracy()}
-
+class UtilsPairedTest:
+    @staticmethod
     def prepare_batch_fn(batch, device, non_blocking):
         B, *_ = batch["image-pos"].shape
         # batch = {k: v.to(device, non_blocking=non_blocking) for k, v in batch.items()}
         batch = {k: convert_tensor(v, device, non_blocking) for k, v in batch.items()}
-        inp = batch["audio"], batch["audio-length"], batch["image-pos"], batch["image-neg"]
+        inp = (
+            batch["audio"],
+            batch["audio-length"],
+            batch["image-pos"],
+            batch["image-neg"],
+        )
         out = torch.zeros(B, device=device, dtype=torch.long)
         return inp, out
 
+    @staticmethod
     def output_transform(x, y, y_pred):
         y_pred = y_pred.argmax(dim=1)
         return y_pred, y
 
-    model_fn = lambda model, inputs: model.predict_paired_test(*inputs)
+    @staticmethod
+    def model_fn(model, inputs):
+        return model.predict_paired_test(*inputs)
 
-    return create_supervised_evaluator(
-        model,
-        prepare_batch=prepare_batch_fn,
-        model_fn=model_fn,
-        device=device,
-        output_transform=output_transform,
-        metrics=metrics,
-    )
+    @staticmethod
+    def get_metrics(test_name):
+        return {f"accuracy-{test_name}": Accuracy()}
 
 
 @click.command()
@@ -124,37 +135,37 @@ def train(config_name: str):
     #     **config["optimizer"],
     # )
 
-    metrics = {
-        "loss": Loss(identity_loss, device=device),
-    }
-
-    model_fn = lambda model, inputs: model.compute_loss(*inputs)
-
     # Trainer and evaluator
     trainer = create_supervised_trainer(
         model,
         optimizer,
-        prepare_batch=prepare_batch_fn,
-        model_fn=model_fn,
+        prepare_batch=UtilsTraining.prepare_batch_fn,
+        model_fn=UtilsTraining.model_fn,
         loss_fn=identity_loss,
         device=device,
     )
     evaluator = create_supervised_evaluator(
         model,
-        prepare_batch=prepare_batch_fn,
-        model_fn=model_fn,
+        prepare_batch=UtilsTraining.prepare_batch_fn,
+        model_fn=UtilsTraining.model_fn,
         device=device,
-        metrics=metrics,
+        metrics=UtilsTraining.get_metrics(),
     )
-    evaluator_ff = create_supervised_evaluator_paired_test(
+    evaluator_ff = create_supervised_evaluator(
         model,
-        device,
-        test_name="familiar-familiar",
+        prepare_batch=UtilsPairedTest.prepare_batch_fn,
+        model_fn=UtilsPairedTest.model_fn,
+        device=device,
+        output_transform=UtilsPairedTest.output_transform,
+        metrics=UtilsPairedTest.get_metrics("familiar-familiar"),
     )
-    evaluator_nf = create_supervised_evaluator_paired_test(
+    evaluator_nf = create_supervised_evaluator(
         model,
-        device,
-        test_name="novel-familiar",
+        prepare_batch=UtilsPairedTest.prepare_batch_fn,
+        model_fn=UtilsPairedTest.model_fn,
+        device=device,
+        output_transform=UtilsPairedTest.output_transform,
+        metrics=UtilsPairedTest.get_metrics("novel-familiar"),
     )
 
     # Model checkpoint
@@ -205,7 +216,9 @@ def train(config_name: str):
 
     num_steps_per_epoch = len(dataloader_train)
     warmup_duration = num_steps_per_epoch * config["warmup_epochs"]
-    cycle_size = num_steps_per_epoch * (config["max_epochs"] - config["warmup_epochs"])
+    cycle_size = (
+        num_steps_per_epoch * (config["max_epochs"] - config["warmup_epochs"]) + 1
+    )
     base_scheduler = CosineAnnealingScheduler(
         optimizer,
         "lr",
