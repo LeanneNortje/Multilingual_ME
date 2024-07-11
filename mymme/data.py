@@ -144,17 +144,13 @@ def load_audio(datum: dict):
 
     # logspec = melspec
     logspec = librosa.power_to_db(melspec, ref=np.max)  # D × T
-    audio_length = min(logspec.shape[1], CONFIG["target-length"])
+    # audio_length = min(logspec.shape[1], CONFIG["target-length"])
 
-    logspec = logspec.T  # T × D
-    logspec = pad_to_length(logspec, CONFIG["target-length"], CONFIG["pad-value"])
-    logspec = logspec.T
+    # logspec = logspec.T  # T × D
+    # logspec = pad_to_length(logspec, CONFIG["target-length"], CONFIG["pad-value"])
+    # logspec = logspec.T
 
-    logspec = torch.tensor(logspec)
-    return {
-        "audio": logspec,
-        "audio-length": audio_length,
-    }
+    return torch.tensor(logspec)
 
 
 def group_by_word(data):
@@ -236,9 +232,10 @@ class PairedMEDataset(Dataset):
 
         data_pos = [
             {
+                "index": i,
+                "audio": load_audio(audio_name),
                 "image": load_image(image_name, transform_image),
                 "label": 1,
-                **load_audio(audio_name),
             }
             for image_name, audio_name in zip(images_pos, audios_pos)
         ]
@@ -248,14 +245,15 @@ class PairedMEDataset(Dataset):
 
         data_neg = [
             {
+                "index": i,
+                "audio": load_audio(audio_name),
                 "image": load_image(image_name, transform_image),
                 "label": 0,
-                **load_audio(audio_name),
             }
             for image_name, audio_name in zip(images_neg, audios_neg)
         ]
 
-        return default_collate(data_pos + data_neg)
+        return data_pos + data_neg
 
     def __len__(self):
         return len(self.word_audio)
@@ -283,20 +281,18 @@ class PairedTestDataset(Dataset):
         return len(self.data_pairs)
 
 
-def setup_data(*, num_workers, batch_size, **dataset_kwargs):
-    train_dataset = PairedMEDataset(split="train", **dataset_kwargs)
-    valid_dataset = PairedMEDataset(split="valid", **dataset_kwargs)
+def setup_data(*, num_workers, batch_size, **kwargs_ds):
+    train_dataset = PairedMEDataset(split="train", **kwargs_ds)
+    valid_dataset = PairedMEDataset(split="valid", **kwargs_ds)
 
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-    )
-    valid_dataloader = DataLoader(
-        valid_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-    )
+    kwargs_dl = {
+        "num_workers": num_workers,
+        "batch_size": batch_size,
+        "collate_fn": collate_nested,
+    }
+
+    train_dataloader = DataLoader(train_dataset, **kwargs_dl)
+    valid_dataloader = DataLoader(valid_dataset, **kwargs_dl)
 
     return train_dataloader, valid_dataloader
 
@@ -309,13 +305,13 @@ def setup_data_paired_test(*, num_workers, batch_size):
         dataset_ff,
         batch_size=batch_size,
         num_workers=num_workers,
-        collate_fn=default_collate,
+        collate_fn=collate_with_audio,
     )
     dataloader_nf = DataLoader(
         dataset_nf,
         batch_size=batch_size,
         num_workers=num_workers,
-        collate_fn=default_collate,
+        collate_fn=collate_with_audio,
     )
 
     return dataloader_ff, dataloader_nf
@@ -326,12 +322,20 @@ def collate_with_audio(batch):
     lengths = torch.tensor([datum["audio"].shape[1] for datum in batch])
     rest = [dissoc(datum, "audio") for datum in batch]
     rest = default_collate(rest)
-    return {"audio": (audios, lengths), **rest}
+    return {"audio": audios, "audio-length": lengths, **rest}
+
+
+def collate_nested(batch):
+    B = len(batch)
+    N = len(batch[0])
+    batch = [datum for data in batch for datum in data]
+    batch = collate_with_audio(batch)
+    return {key: data.view(B, N, *data.shape[1:]) for key, data in batch.items()}
 
 
 if __name__ == "__main__":
-    num_pos = 4
-    num_neg = 12
+    num_pos = 1
+    num_neg = 9
     dataset = PairedMEDataset(
         split="train",
         langs=("english",),
@@ -339,10 +343,14 @@ if __name__ == "__main__":
         num_neg=num_neg,
         # num_word_repeats=5,
     )
-    dataloader = DataLoader(dataset, num_workers=0)
-    import pdb
+    dataloader = DataLoader(
+        dataset,
+        num_workers=0,
+        batch_size=4,
+        collate_fn=collate_nested,
+    )
 
-    pdb.set_trace()
     for batch in dataloader:
-        # print(batch["image"][0, 0, :3, :3])
+        import pdb
+
         pdb.set_trace()

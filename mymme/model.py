@@ -119,10 +119,7 @@ class AudioEncoder(nn.Module):
                     print(f"WARN · Missing key: {key}")
             self.load_state_dict(model_dict)
 
-    def forward(self, mels_and_lengths):
-        mels, lengths = mels_and_lengths
-        lengths = lengths // self.conv.stride[0]
-
+    def forward(self, mels, lengths):
         mels = mels.transpose(1, 2)  # B × D × T
 
         z = self.conv(mels)
@@ -131,6 +128,7 @@ class AudioEncoder(nn.Module):
         z = z.transpose(1, 2)  # B × T × D
         z = self.encoder(z)
 
+        lengths = lengths // self.conv.stride[0]
         z = pack_padded_sequence(
             z,
             lengths.cpu(),
@@ -286,12 +284,13 @@ class MattNet(nn.Module):
         τ = 1.0
         return τ * sim
 
-    def compute_loss(self, audio, image, labels):
+    def compute_loss(self, audio, audio_length, image, labels):
         """Input shapes:
 
-        - audio:  B × (pos + neg) × D × T
-        - image:  B × (pos + neg) × 3 × H × W
-        - labels: B × (pos + neg)
+        - audio:        B × (pos + neg) × D × T
+        - audio_length: B × (pos + neg)
+        - image:        B × (pos + neg) × 3 × H × W
+        - labels:       B × (pos + neg)
 
         """
 
@@ -302,18 +301,19 @@ class MattNet(nn.Module):
             sim, _ = sim.max(dim=-1)
             return sim
 
-        B1, N1, D, T = audio.shape
-        B2, N2, C, H, W = image.shape
+        B1, N1, *_ = audio.shape
+        B2, N2, *_ = image.shape
 
         assert B1 == B2 and N1 == N2
         B = B1
         N = N1
 
-        audio = audio.view(B * N, D, T)
-        audio_emb = self.audio_enc(audio)
+        audio = audio.view(B * N, *audio.shape[2:])
+        audio_length = audio_length.view(B * N)
+        audio_emb = self.audio_enc(audio, audio_length)
         audio_emb = audio_emb.view(B, N, *audio_emb.shape[1:])
 
-        image = image.view(B * N, C, H, W)
+        image = image.view(B * N, *image.shape[2:])
         image_emb = self.image_enc(image)
         image_emb = image_emb.view(B, N, *image_emb.shape[1:])
 
@@ -333,19 +333,23 @@ class MattNet(nn.Module):
         true = torch.zeros(2 * B).to(labels.device).long()
         return F.cross_entropy(pred, true)
 
-    def predict_paired_test(self, audio, image_pos, image_neg):
+    def predict_paired_test(self, audio, audio_length, image_pos, image_neg):
         """Input shapes:
 
-        - audio:      B × D × T
-        - image-pos:  B × 3 × H × W
-        - image-neg:  B × 3 × H × W
+        - audio:        B × D × T
+        - audio_length: B
+        - image-pos:    B × 3 × H × W
+        - image-neg:    B × 3 × H × W
 
         """
-        audio_emb = self.audio_enc(audio)
+        audio_emb = self.audio_enc(audio, audio_length)
+
         image_pos_emb = self.image_enc(image_pos)
         image_neg_emb = self.image_enc(image_neg)
+
         scores_pos = self.score_emb(audio_emb, image_pos_emb, type="pair")
         scores_neg = self.score_emb(audio_emb, image_neg_emb, type="pair")
+
         scores = torch.stack([scores_pos, scores_neg], dim=1)
         return F.softmax(scores, dim=1)
 
