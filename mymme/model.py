@@ -2,17 +2,38 @@ import torch
 
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.nn.utils.rnn import (
+    pack_padded_sequence,
+    unpack_sequence,
+    pad_packed_sequence,
+)
 from torchvision.models import alexnet
 
 
-AUDIO_POOLING_LAYERS = {
-    "average": lambda **kwargs: nn.AdaptiveAvgPool1d(1),
-    "two-layer-mlp": lambda frame_dim: nn.Sequential(
+def get_average_pooling_layer(**_):
+    def func(x, lens):
+        return x.sum(dim=-1, keepdims=True) / lens
+
+    return func
+
+
+def get_two_layer_mlp_pooling_layer(*, frame_dim):
+    layer = nn.Sequential(
         nn.Linear(frame_dim // 2, frame_dim // 4),
         nn.LeakyReLU(),
         nn.Linear(frame_dim // 4, 1),
         nn.LeakyReLU(),
-    ),
+    )
+
+    def func(x, lens):
+        return layer(x)
+
+    return func
+
+
+AUDIO_POOLING_LAYERS = {
+    "average": get_average_pooling_layer,
+    "two-layer-mlp": get_two_layer_mlp_pooling_layer,
 }
 
 
@@ -98,13 +119,24 @@ class AudioEncoder(nn.Module):
                     print(f"WARN · Missing key: {key}")
             self.load_state_dict(model_dict)
 
-    def forward(self, mels):
-        # mels: B × D × T
+    def forward(self, mels_and_lengths):
+        mels, lengths = mels_and_lengths
+        lengths = lengths // self.conv.stride[0]
+
+        mels = mels.transpose(1, 2)  # B × D × T
+
         z = self.conv(mels)
         z = self.relu(z)
 
         z = z.transpose(1, 2)  # B × T × D
         z = self.encoder(z)
+
+        z = pack_padded_sequence(
+            z,
+            lengths.cpu(),
+            batch_first=True,
+            enforce_sorted=False,
+        )
 
         c, _ = self.rnn1(z)
         c, _ = self.rnn2(c)
@@ -114,8 +146,9 @@ class AudioEncoder(nn.Module):
         s, _ = self.english_rnn1(c)
         s, _ = self.english_rnn2(s)
 
+        s, _ = pad_packed_sequence(s, batch_first=True)
         s = s.transpose(1, 2)  # B × D × T
-        s = self.pooling_layer(s)
+        s = self.pooling_layer(s, lengths)
 
         # return z, z, s
         return s

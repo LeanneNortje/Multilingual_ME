@@ -12,7 +12,7 @@ import scipy
 import torch
 
 from torch.utils.data import DataLoader, Dataset, IterableDataset, default_collate
-from torch.nn.utils.rnn import pad_sequence
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 
 from PIL import Image
 from torchvision import transforms as T
@@ -92,7 +92,7 @@ def load_image(datum: dict, transform_image=transform_image_test) -> torch.Tenso
     return transform_image(img)
 
 
-def load_audio(datum: dict) -> torch.Tensor:
+def load_audio(datum: dict):
     def preemphasis(signal, coeff=0.97):
         return np.append(signal[0], signal[1:] - coeff * signal[:-1])
 
@@ -144,13 +144,17 @@ def load_audio(datum: dict) -> torch.Tensor:
 
     # logspec = melspec
     logspec = librosa.power_to_db(melspec, ref=np.max)  # D × T
+    audio_length = min(logspec.shape[1], CONFIG["target-length"])
 
     logspec = logspec.T  # T × D
     logspec = pad_to_length(logspec, CONFIG["target-length"], CONFIG["pad-value"])
     logspec = logspec.T
 
     logspec = torch.tensor(logspec)
-    return logspec
+    return {
+        "audio": logspec,
+        "audio-length": audio_length,
+    }
 
 
 def group_by_word(data):
@@ -233,8 +237,8 @@ class PairedMEDataset(Dataset):
         data_pos = [
             {
                 "image": load_image(image_name, transform_image),
-                "audio": load_audio(audio_name),
                 "label": 1,
+                **load_audio(audio_name),
             }
             for image_name, audio_name in zip(images_pos, audios_pos)
         ]
@@ -245,8 +249,8 @@ class PairedMEDataset(Dataset):
         data_neg = [
             {
                 "image": load_image(image_name, transform_image),
-                "audio": load_audio(audio_name),
                 "label": 0,
+                **load_audio(audio_name),
             }
             for image_name, audio_name in zip(images_neg, audios_neg)
         ]
@@ -305,21 +309,24 @@ def setup_data_paired_test(*, num_workers, batch_size):
         dataset_ff,
         batch_size=batch_size,
         num_workers=num_workers,
+        collate_fn=default_collate,
     )
     dataloader_nf = DataLoader(
         dataset_nf,
         batch_size=batch_size,
         num_workers=num_workers,
+        collate_fn=default_collate,
     )
 
     return dataloader_ff, dataloader_nf
 
 
-def my_collate_fn(batch):
-    audios = pad_sequence([datum["audio"] for datum in batch], batch_first=True)
+def collate_with_audio(batch):
+    audios = pad_sequence([datum["audio"].T for datum in batch], batch_first=True)
+    lengths = torch.tensor([datum["audio"].shape[1] for datum in batch])
     rest = [dissoc(datum, "audio") for datum in batch]
     rest = default_collate(rest)
-    return {"audio": audios, **rest}
+    return {"audio": (audios, lengths), **rest}
 
 
 if __name__ == "__main__":
@@ -332,7 +339,7 @@ if __name__ == "__main__":
         num_neg=num_neg,
         # num_word_repeats=5,
     )
-    dataloader = DataLoader(dataset, num_workers=4)
+    dataloader = DataLoader(dataset, num_workers=0)
     import pdb
 
     pdb.set_trace()

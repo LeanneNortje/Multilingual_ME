@@ -64,29 +64,30 @@ def identity_loss(loss, _):
 
 def prepare_batch_fn(batch, device, non_blocking):
     batch = {k: convert_tensor(v, device, non_blocking) for k, v in batch.items()}
-    inp = batch["audio"], batch["image"], batch["label"]
+    inp = (batch["audio"], batch["audio-length"]), batch["image"], batch["label"]
     out = batch["label"]
     return inp, out
 
 
 def model_fn(model, inp):
-    audio, image, labels = inp
-    return model.compute_loss(audio, image, labels)
+    audio_and_length, image, labels = inp
+    return model.compute_loss(audio_and_length, image, labels)
 
 
 def create_supervised_evaluator_paired_test(model, device, test_name):
     metrics = {f"accuracy-{test_name}": Accuracy()}
 
     def prepare_batch_fn(batch, device, non_blocking):
-        B, *_ = batch["audio"].shape
+        B, *_ = batch["image-pos"].shape
+        # batch = {k: v.to(device, non_blocking=non_blocking) for k, v in batch.items()}
         batch = {k: convert_tensor(v, device, non_blocking) for k, v in batch.items()}
-        inp = batch["audio"], batch["image-pos"], batch["image-neg"]
+        inp = (batch["audio"], batch["audio-length"]), batch["image-pos"], batch["image-neg"]
         out = torch.zeros(B, device=device, dtype=torch.long)
         return inp, out
 
     def model_fn(model, inp):
-        audio, image_pos, image_neg = inp
-        return model.predict_paired_test(audio, image_pos, image_neg)
+        audio_and_length, image_pos, image_neg = inp
+        return model.predict_paired_test(audio_and_length, image_pos, image_neg)
 
     def output_transform(x, y, y_pred):
         y_pred = y_pred.argmax(dim=1)
