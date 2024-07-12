@@ -104,8 +104,8 @@ class UtilsPairedTest:
         return model.predict_paired_test(*inputs)
 
     @staticmethod
-    def get_metrics(test_name):
-        return {f"accuracy-{test_name}": Accuracy()}
+    def get_metrics(test_name, device):
+        return {f"accuracy-{test_name}": Accuracy(device=device)}
 
 
 @click.command()
@@ -149,7 +149,7 @@ def train(config_name: str):
         prepare_batch=UtilsTraining.prepare_batch_fn,
         model_fn=UtilsTraining.model_fn,
         device=device,
-        metrics=UtilsTraining.get_metrics(),
+        metrics=UtilsTraining.get_metrics(device),  # type: ignore
     )
     evaluator_ff = create_supervised_evaluator(
         model,
@@ -157,7 +157,7 @@ def train(config_name: str):
         model_fn=UtilsPairedTest.model_fn,
         device=device,
         output_transform=UtilsPairedTest.output_transform,
-        metrics=UtilsPairedTest.get_metrics("familiar-familiar"),
+        metrics=UtilsPairedTest.get_metrics("familiar-familiar", device),  # type: ignore
     )
     evaluator_nf = create_supervised_evaluator(
         model,
@@ -165,7 +165,7 @@ def train(config_name: str):
         model_fn=UtilsPairedTest.model_fn,
         device=device,
         output_transform=UtilsPairedTest.output_transform,
-        metrics=UtilsPairedTest.get_metrics("novel-familiar"),
+        metrics=UtilsPairedTest.get_metrics("novel-familiar", device),  # type: ignore
     )
 
     # Model checkpoint
