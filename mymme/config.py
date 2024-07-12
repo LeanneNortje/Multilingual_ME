@@ -277,4 +277,66 @@ CONFIGS = {
             },
         },
     },
+    "09": {
+        "seed": 42,
+        "device": "cuda",
+        "max_epochs": 24,
+        "warmup_epochs": 2,
+        "n_saved": 5,
+        "log_every_iters": 5,
+        "optimizer": {
+            "lr": 2e-4,
+            "weight_decay": 5e-7,
+        },
+        "data": {
+            "langs": ("english",),
+            "num_pos": 1,
+            "num_neg": 11,
+            "num_workers": 32,
+            "batch_size": 32,
+            "to_shuffle": True,
+        },
+        "model": {
+            "model_name": "mattnet",
+            "audio_encoder_kwargs": {
+                "use_pretrained_cpc": False,
+                "pooling_layer": "average",
+            },
+            "image_encoder_kwargs": {
+                "embedding_dim": 2048,
+                "use_pretrained_alexnet": True,
+            },
+        },
+    },
+    "10": {
+        "seed": 42,
+        "device": "cuda",
+        "max_epochs": 32,
+        "warmup_epochs": 2,
+        "n_saved": 5,
+        "log_every_iters": 5,
+        "optimizer": {
+            "lr": 2e-4,
+            "weight_decay": 5e-7,
+        },
+        "data": {
+            "langs": ("english",),
+            "num_pos": 1,
+            "num_neg": 11,
+            "num_workers": 32,
+            "batch_size": 48,
+            "to_shuffle": True,
+        },
+        "model": {
+            "model_name": "mattnet",
+            "audio_encoder_kwargs": {
+                "use_pretrained_cpc": False,
+                "pooling_layer": "average",
+            },
+            "image_encoder_kwargs": {
+                "embedding_dim": 2048,
+                "use_pretrained_alexnet": True,
+            },
+        },
+    },
 }
