@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -251,7 +252,8 @@ def train(local_rank, config_name: str):
     def print_metrics(engine, tag):
         assert tag == "train"
         print(
-            "{:s} · {:4d} / {:4d} · loss: {:.3f} · loss avg: {:.3f} ◇ lr: {:f}".format(
+            "{:s} ◇ {:s} · {:4d} / {:4d} · loss: {:.3f} · loss avg: {:.3f} ◇ lr: {:f}".format(
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 tag,
                 engine.state.epoch,
                 engine.state.iteration,
