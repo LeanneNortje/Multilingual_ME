@@ -8,6 +8,7 @@ from torch.nn import functional as F
 
 import click
 
+import ignite.distributed as idist
 from ignite.engine import Events, create_supervised_trainer, create_supervised_evaluator
 from ignite.handlers import ModelCheckpoint, create_lr_scheduler_with_warmup
 from ignite.handlers.early_stopping import EarlyStopping
@@ -21,7 +22,12 @@ from ignite.handlers.tensorboard_logger import (
 )
 
 from mymme.config import CONFIGS
-from mymme.data import setup_data, setup_data_paired_test
+from mymme.data import (
+    collate_nested,
+    collate_with_audio,
+    PairedMEDataset,
+    PairedTestDataset,
+)
 from mymme.model import setup_model
 
 
@@ -62,6 +68,13 @@ def identity_loss(loss, _):
 # return (loss1 + loss2) / 2
 
 
+def unwrap_model(model):
+    if hasattr(model, "module"):
+        return model.module
+    else:
+        return model
+
+
 class UtilsTraining:
     @staticmethod
     def prepare_batch_fn(batch, device, non_blocking):
@@ -72,7 +85,7 @@ class UtilsTraining:
 
     @staticmethod
     def model_fn(model, inputs):
-        return model.compute_loss(*inputs)
+        return unwrap_model(model).compute_loss(*inputs)
 
     @staticmethod
     def get_metrics(device):
@@ -101,16 +114,51 @@ class UtilsPairedTest:
 
     @staticmethod
     def model_fn(model, inputs):
-        return model.predict_paired_test(*inputs)
+        return unwrap_model(model).predict_paired_test(*inputs)
 
     @staticmethod
     def get_metrics(test_name, device):
         return {f"accuracy-{test_name}": Accuracy(device=device)}
 
 
-@click.command()
-@click.argument("config_name", type=str)
-def train(config_name: str):
+def setup_data(*, num_workers, batch_size, **kwargs_ds):
+    train_dataset = PairedMEDataset(split="train", **kwargs_ds)
+    valid_dataset = PairedMEDataset(split="valid", **kwargs_ds)
+
+    kwargs_dl = {
+        "num_workers": num_workers,
+        "batch_size": batch_size,
+        "collate_fn": collate_nested,
+    }
+
+    train_dataloader = idist.auto_dataloader(train_dataset, **kwargs_dl)
+    valid_dataloader = idist.auto_dataloader(valid_dataset, **kwargs_dl)
+
+    return train_dataloader, valid_dataloader
+
+
+def setup_data_paired_test(*, num_workers, batch_size):
+    dataset_ff = PairedTestDataset("familiar-familiar")
+    dataset_nf = PairedTestDataset("novel-familiar")
+
+    dataloader_ff = idist.auto_dataloader(
+        dataset_ff,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        collate_fn=collate_with_audio,
+    )
+    dataloader_nf = idist.auto_dataloader(
+        dataset_nf,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        collate_fn=collate_with_audio,
+    )
+
+    return dataloader_ff, dataloader_nf
+
+
+def train(local_rank, config_name: str):
+    rank = idist.get_rank()
     config = CONFIGS[config_name]
     manual_seed(config["seed"])
 
@@ -119,14 +167,19 @@ def train(config_name: str):
     output_dir.mkdir(parents=True, exist_ok=True)
     # config.output_dir = output_dir
 
+    world_size = idist.get_world_size()
     dataloader_train, dataloader_valid = setup_data(**config["data"])
-    dataloader_ff, dataloader_nf = setup_data_paired_test(batch_size=64, num_workers=4)
+    dataloader_ff, dataloader_nf = setup_data_paired_test(
+        batch_size=world_size * 16, num_workers=4
+    )
 
     device = config["device"]
     model = setup_model(**config["model"])
     model.to(device=device)
+    model = idist.auto_model(model)
 
     optimizer = optim.Adam(model.parameters(), **config["optimizer"])
+    optimizer = idist.auto_optim(optimizer)
     # optimizer = optim.Adam(
     #     [
     #         {"params": model.audio_enc.parameters(), "name": "audio-enc"},
@@ -184,7 +237,7 @@ def train(config_name: str):
     evaluator.add_event_handler(
         Events.EPOCH_COMPLETED(every=1),
         handler,
-        {"model": model},
+        {"model": unwrap_model(model)},
     )
 
     # Early stopping
@@ -208,11 +261,12 @@ def train(config_name: str):
             )
         )
 
-    trainer.add_event_handler(
-        Events.ITERATION_COMPLETED(every=config["log_every_iters"]),
-        print_metrics,
-        tag="train",
-    )
+    if rank == 0:
+        trainer.add_event_handler(
+            Events.ITERATION_COMPLETED(every=config["log_every_iters"]),
+            print_metrics,
+            tag="train",
+        )
 
     num_steps_per_epoch = len(dataloader_train)
     warmup_duration = num_steps_per_epoch * config["warmup_epochs"]
@@ -242,60 +296,61 @@ def train(config_name: str):
         evaluator_ff.run(dataloader_ff)
         evaluator_nf.run(dataloader_nf)
         evaluator.run(dataloader_valid)
-        print(
-            "{:s} · {:4d} / {:4d} · loss: {:.3f} ◇ FF: {:.3f} · NF: {:.3f}".format(
-                "eval.",
-                trainer.state.epoch,
-                trainer.state.iteration,
-                evaluator.state.metrics["loss"],
-                evaluator_ff.state.metrics["accuracy-familiar-familiar"],
-                evaluator_nf.state.metrics["accuracy-novel-familiar"],
+        if rank == 0:
+            print(
+                "{:s} ◇ {:s} · {:4d} / {:4d} · loss: {:.3f} ◇ FF: {:.3f} · NF: {:.3f}".format(
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "eval.",
+                    trainer.state.epoch,
+                    trainer.state.iteration,
+                    evaluator.state.metrics["loss"],
+                    evaluator_ff.state.metrics["accuracy-familiar-familiar"],
+                    evaluator_nf.state.metrics["accuracy-novel-familiar"],
+                )
             )
+
+    if rank == 0:
+        # Create a logger
+        log_dir = output_dir / "tb-logs"
+        tb_logger = TensorboardLogger(log_dir=log_dir)
+
+        # Attach the logger to the trainer to log training loss at each iteration
+        tb_logger.attach_output_handler(
+            trainer,
+            event_name=Events.ITERATION_COMPLETED(every=config["log_every_iters"]),
+            tag="train",
+            output_transform=lambda loss: {"loss": loss},
         )
 
-    # Create a logger
-    log_dir = output_dir / "tb-logs"
-    tb_logger = TensorboardLogger(log_dir=log_dir)
+        tb_logger.attach_output_handler(
+            evaluator,
+            event_name=Events.COMPLETED,
+            tag="valid",
+            metric_names=["loss"],
+            global_step_transform=global_step_from_engine(trainer),
+        )
 
-    # Attach the logger to the trainer to log training loss at each iteration
-    tb_logger.attach_output_handler(
-        trainer,
-        event_name=Events.ITERATION_COMPLETED(every=config["log_every_iters"]),
-        tag="train",
-        output_transform=lambda loss: {"loss": loss},
-    )
+        tb_logger.attach_output_handler(
+            evaluator_ff,
+            event_name=Events.COMPLETED,
+            tag="test",
+            metric_names=["accuracy-familiar-familiar"],
+            global_step_transform=global_step_from_engine(trainer),
+        )
 
-    tb_logger.attach_output_handler(
-        evaluator,
-        event_name=Events.COMPLETED,
-        tag="valid",
-        metric_names=["loss"],
-        global_step_transform=global_step_from_engine(trainer),
-    )
+        tb_logger.attach_output_handler(
+            evaluator_nf,
+            event_name=Events.COMPLETED,
+            tag="test",
+            metric_names=["accuracy-novel-familiar"],
+            global_step_transform=global_step_from_engine(trainer),
+        )
 
-    tb_logger.attach_output_handler(
-        evaluator_ff,
-        event_name=Events.COMPLETED,
-        tag="test",
-        metric_names=["accuracy-familiar-familiar"],
-        global_step_transform=global_step_from_engine(trainer),
-    )
-
-    tb_logger.attach_output_handler(
-        evaluator_nf,
-        event_name=Events.COMPLETED,
-        tag="test",
-        metric_names=["accuracy-novel-familiar"],
-        global_step_transform=global_step_from_engine(trainer),
-    )
-
-    tb_logger.attach_opt_params_handler(
-        trainer,
-        event_name=Events.ITERATION_STARTED,
-        optimizer=optimizer,
-    )
-
-    tb_logger.close()
+        tb_logger.attach_opt_params_handler(
+            trainer,
+            event_name=Events.ITERATION_STARTED,
+            optimizer=optimizer,
+        )
 
     # Setup is done. Let's run the training.
     trainer.run(
@@ -304,6 +359,17 @@ def train(config_name: str):
         # epoch_length=config["epoch_length"],
     )
 
+    if rank == 0:
+        tb_logger.close()
+
+
+@click.command()
+@click.argument("config_name", type=str)
+def main(config_name):
+    backend = "nccl"
+    with idist.Parallel(backend=backend) as parallel:
+        parallel.run(train, config_name)
+
 
 if __name__ == "__main__":
-    train()
+    main()

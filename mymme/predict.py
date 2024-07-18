@@ -137,7 +137,7 @@ def evaluate_model_batched(test_name, model, device):
         num_workers=4,
         collate_fn=collate_with_audio,
     )
-    model_fn = UtilsPairedTest.model_fn
+    model_fn = lambda model, inputs: model.predict_paired_test(*inputs)
     prepare_batch_fn = UtilsPairedTest.prepare_batch_fn
     with torch.no_grad():
         preds = [

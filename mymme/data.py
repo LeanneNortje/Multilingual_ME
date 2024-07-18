@@ -282,41 +282,6 @@ class PairedTestDataset(Dataset):
         return len(self.data_pairs)
 
 
-def setup_data(*, num_workers, batch_size, **kwargs_ds):
-    train_dataset = PairedMEDataset(split="train", **kwargs_ds)
-    valid_dataset = PairedMEDataset(split="valid", **kwargs_ds)
-
-    kwargs_dl = {
-        "num_workers": num_workers,
-        "batch_size": batch_size,
-        "collate_fn": collate_nested,
-    }
-
-    train_dataloader = DataLoader(train_dataset, **kwargs_dl)
-    valid_dataloader = DataLoader(valid_dataset, **kwargs_dl)
-
-    return train_dataloader, valid_dataloader
-
-
-def setup_data_paired_test(*, num_workers, batch_size):
-    dataset_ff = PairedTestDataset("familiar-familiar")
-    dataset_nf = PairedTestDataset("novel-familiar")
-
-    dataloader_ff = DataLoader(
-        dataset_ff,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        collate_fn=collate_with_audio,
-    )
-    dataloader_nf = DataLoader(
-        dataset_nf,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        collate_fn=collate_with_audio,
-    )
-
-    return dataloader_ff, dataloader_nf
-
 
 def collate_with_audio(batch):
     audio = pad_sequence([datum["audio"].T for datum in batch], batch_first=True)
