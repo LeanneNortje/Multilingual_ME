@@ -241,10 +241,15 @@ class ImageEncoder(nn.Module):
 
 
 class MattNet(nn.Module):
-    def __init__(self, audio_encoder_kwargs, image_encoder_kwargs):
+    def __init__(self, pooling, audio_encoder_kwargs, image_encoder_kwargs):
         super(MattNet, self).__init__()
+        SCORE_EMB_FUNCS = {
+            "features-avg": self.score_emb_pool_features_avg,
+            "scores-max": self.score_emb_pool_scores_max,
+        }
         self.audio_enc = AudioEncoder(**audio_encoder_kwargs)
         self.image_enc = ImageEncoder(**image_encoder_kwargs)
+        self.score_emb = SCORE_EMB_FUNCS[pooling]
         # self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / 0.07)))
 
     # def forward(self, audio, image):
@@ -258,7 +263,17 @@ class MattNet(nn.Module):
         image_emb = self.image_enc(image)
         return self.score_emb(audio_emb, image_emb, type)
 
-    def score_emb(self, audio_emb, image_emb, type):
+    def score_emb_pool_features_avg(self, audio_emb, image_emb, type):
+        EINSUM_OP = {
+            "pair": "bd,bd->b",
+            "cross": "xd,yd->xy",
+            "pair-and-cross": "bnd,bmd->bnm",
+        }
+        audio_emb = audio_emb.mean(dim=-1)
+        image_emb = image_emb.mean(dim=-1)
+        return torch.einsum(EINSUM_OP[type], audio_emb, image_emb)
+
+    def score_emb_pool_scores_max(self, audio_emb, image_emb, type):
         # def compute1(a, i):
         #     att = torch.bmm(a.unsqueeze(0).transpose(1, 2), i.unsqueeze(0))
         #     s = att.max()
@@ -267,6 +282,7 @@ class MattNet(nn.Module):
         EINSUM_OP = {
             "pair": "bda,bdi->bai",
             "cross": "xda,ydi->xyai",
+            "pair-and-cross": "bnda,bmdi->bnmai",
         }
         op = EINSUM_OP[type]
 
@@ -295,14 +311,9 @@ class MattNet(nn.Module):
         - image:        B × (pos + neg) × 3 × H × W
         - labels:       B × (pos + neg)
 
-        """
+        Currently, we assume that there is a single positive: pos = 1.
 
-        def score_audio_image(audio_emb, image_emb):
-            op = "bnda,bmdi->bnmai"
-            sim = torch.einsum(op, audio_emb, image_emb)
-            sim, _ = sim.max(dim=-1)
-            sim, _ = sim.max(dim=-1)
-            return sim
+        """
 
         B1, N1, *_ = audio.shape
         B2, N2, *_ = image.shape
@@ -326,9 +337,9 @@ class MattNet(nn.Module):
         assert labels[:, 1:].sum() == 0
         # assert labels == torch.cat([torch.ones(B, 1), torch.zeros(B, N - 1)], dim=1)
 
-        sim1 = score_audio_image(audio_emb[:, :1], image_emb)
+        sim1 = self.score_emb(audio_emb[:, :1], image_emb, "pair-and-cross")
         sim1 = sim1.squeeze(1)
-        sim2 = score_audio_image(audio_emb, image_emb[:, :1])
+        sim2 = self.score_emb(audio_emb, image_emb[:, :1], "pair-and-cross")
         sim2 = sim2.squeeze(2)
 
         pred = torch.cat([sim1, sim2], dim=0)
