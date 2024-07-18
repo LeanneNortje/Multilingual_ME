@@ -103,6 +103,7 @@ class AudioEncoder(nn.Module):
                 assert fst == prefix
                 return ".".join(rest)
 
+            print("Using pretrained CPC")
             path = "mymme/checkpoints/audio-model-cpc-epoch-1500.pt"
             model_weights = torch.load(path)
             model_weights = model_weights["acoustic_model"]
